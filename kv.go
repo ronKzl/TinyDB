@@ -3,11 +3,11 @@ package kvdb
 import "bytes"
 
 type KV struct {
-	mem map[string][]byte // []byte is unsuported as key to maps in GO
+	mem map[string][]byte
 }
 
 func (kv *KV) Open() error {
-	kv.mem = map[string][]byte{} //empty
+	kv.mem = map[string][]byte{}
 	return nil
 }
 
@@ -19,9 +19,9 @@ func (kv *KV) Get(key []byte) (val []byte, ok bool, err error) {
 }
 
 func (kv *KV) Set(key []byte, val []byte) (updated bool, err error) {
-	prev_val, existed := kv.mem[string(key)]
+	prevVal, existed := kv.mem[string(key)]
 	kv.mem[string(key)] = val
-	updated = !existed || !bytes.Equal(prev_val,val)
+	updated = !existed || !bytes.Equal(prevVal,val)
 	return
 }
 
