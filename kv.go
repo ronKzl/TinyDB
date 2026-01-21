@@ -1,11 +1,15 @@
 package kvdb
 
-import "bytes"
+import (
+	"bytes"
+	"io"
+)
 
 type KV struct {
 	log Log
 	mem map[string][]byte
 }
+
 
 func (kv *KV) Open() error {
 	if err := kv.log.Open(); err != nil {
@@ -17,9 +21,9 @@ func (kv *KV) Open() error {
 		entry := Entry{}
 		eof, err := kv.log.Read(&entry)
 		
+		if eof || err == ErrBadSum || err == io.ErrUnexpectedEOF { break }
 		if err != nil { return err}
-		if eof { break }
-
+		
 		// entry go created/updated OR deleted
 		if entry.deleted {
 			delete(kv.mem, string(entry.key))

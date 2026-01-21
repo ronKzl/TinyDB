@@ -11,7 +11,7 @@ type Log struct {
 }
 
 func (log *Log) Open() (err error) {
-	log.fp, err = os.OpenFile(log.FileName, os.O_RDWR|os.O_CREATE, 0o644)
+	log.fp, err = createFileSync(log.FileName)
 	return err
 }
 

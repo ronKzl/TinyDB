@@ -52,12 +52,10 @@ func TestKVBasic(t *testing.T) {
 
 func TestEntryEncode(t *testing.T) {
 	ent := Entry{key: []byte("k1"), val: []byte("xxx")}
-	data := []byte{2, 0, 0, 0, 
-		0, 0, 0, 0, 
-		3, 0, 0, 0, 
-		0, 0, 0, 0, 
-		0, 0, 0, 0,
-		 0, 0, 0, 0, 'k', '1', 'x', 'x', 'x'}
+	data := []byte{0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x1a, 
+		0x53, 0x33, 0x33, 0x23, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 
+		0x0, 0x6b, 0x31, 0x78, 0x78, 0x78}
 
 	assert.Equal(t, data, ent.Encode())
 
@@ -67,12 +65,10 @@ func TestEntryEncode(t *testing.T) {
 	assert.Equal(t, ent, decoded)
 
 	ent = Entry{key: []byte("k1"), deleted: true}
-	data = []byte{2, 0, 0, 0, 
-		0, 0, 0, 0,
-		  0, 0, 0, 0, 
-		  0, 0, 0, 0,
-		    1, 0, 0, 0, 
-			0, 0, 0, 0, 'k', '1'}
+	data = []byte{0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 
+		0x1a, 0x43, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x6b, 0x31}
 
 	assert.Equal(t, data, ent.Encode())
 	decoded = Entry{}
@@ -81,4 +77,55 @@ func TestEntryEncode(t *testing.T) {
 	err = decoded.Decode(bytes.NewBuffer(data))
 	assert.Nil(t, err)
 	assert.Equal(t, ent, decoded)
+}
+
+func TestKVRecovery(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_db"
+	defer os.Remove(kv.log.FileName)
+
+	prepare := func() {
+		os.Remove(kv.log.FileName)
+
+		err := kv.Open()
+		assert.Nil(t, err)
+		defer kv.Close()
+
+		updated, err := kv.Set([]byte("k1"), []byte("v1"))
+		assert.True(t, updated && err == nil)
+		updated, err = kv.Set([]byte("k2"), []byte("v2"))
+		assert.True(t, updated && err == nil)
+	}
+
+	prepare()
+	// simulate truncated log
+	fp, _ := os.OpenFile(kv.log.FileName, os.O_RDWR, 0o644)
+	st, _ := fp.Stat()
+	fp.Truncate(st.Size() - 1)
+	fp.Close()
+	// reopen
+	err := kv.Open()
+	assert.Nil(t, err)
+	// test
+	val, ok, err := kv.Get([]byte("k1"))
+	assert.True(t, string(val) == "v1" && ok && err == nil)
+	_, ok, err = kv.Get([]byte("k2")) // bad
+	assert.True(t, !ok && err == nil)
+	kv.Close()
+
+	prepare()
+	// simulate bad checksum
+	fp, _ = os.OpenFile(kv.log.FileName, os.O_RDWR, 0o644)
+	st, _ = fp.Stat()
+	fp.WriteAt([]byte{0}, st.Size()-1)
+	fp.Close()
+	// reopen
+	err = kv.Open()
+	assert.Nil(t, err)
+	// test
+	val, ok, err = kv.Get([]byte("k1"))
+	assert.True(t, string(val) == "v1" && ok && err == nil)
+	_, ok, err = kv.Get([]byte("k2")) // bad
+	assert.True(t, !ok && err == nil)
+	kv.Close()
 }
