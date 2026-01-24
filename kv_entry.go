@@ -38,8 +38,6 @@ func (ent *Entry) Encode() []byte {
 	var hash uint64 = 0
 	hash = crc64.Checksum(ent.key, tab)
 	hash = crc64.Update(hash,tab,ent.val)
-	println("This is hash:")
-	println(hash)
 	binary.LittleEndian.PutUint64(data[:lengthSize],uint64(len(ent.key)))
 	binary.LittleEndian.PutUint64(data[lengthSize:2*lengthSize],uint64(len(ent.val)))
 	binary.LittleEndian.PutUint64(data[2*lengthSize:3*lengthSize],hash)

@@ -16,11 +16,10 @@ func TestTableCell(t *testing.T) {
 	assert.Equal(t, cell, decoded)
 
 	cell = Cell{Type: TypeStr, Str: []byte("asdf")}
-	data = []byte{4, 0, 0, 0, 'a', 's', 'd', 'f'}
+	data = []byte{4, 0, 0, 0, 0, 0, 0, 0, 'a', 's', 'd', 'f'}
 	assert.Equal(t, data, cell.Encode(nil))
 	decoded = Cell{Type: TypeStr}
 	rest, err = decoded.Decode(data)
 	assert.True(t, len(rest) == 0 && err == nil)
 	assert.Equal(t, cell, decoded)
 }
-
