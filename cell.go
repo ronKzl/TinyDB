@@ -22,14 +22,10 @@ type Cell struct {
 func (cell *Cell) Encode(toAppend []byte) []byte {
 	switch cell.Type {
 	case TypeI64:
-		toAppend = make([]byte,lengthSize)
-		binary.LittleEndian.PutUint64(toAppend,uint64(cell.I64))
-		return toAppend
+		return binary.LittleEndian.AppendUint64(toAppend,uint64(cell.I64))
 	case TypeStr:
-		toAppend = make([]byte, lengthSize+len(cell.Str))
-		binary.LittleEndian.PutUint64(toAppend,uint64(len(cell.Str)))
-		copy(toAppend[lengthSize:], cell.Str)
-		return toAppend
+		toAppend = binary.LittleEndian.AppendUint64(toAppend,uint64(len(cell.Str)))
+		return append(toAppend, cell.Str...)
 	default:
 		panic("Can't be encoded")
 	}
