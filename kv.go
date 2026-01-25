@@ -10,6 +10,13 @@ type KV struct {
 	mem map[string][]byte
 }
 
+type updateMode int 
+
+const (
+	ModeUpsert updateMode = 0 // insert OR update
+	ModeInsert updateMode = 1 // insert NEW
+	ModeUpdate updateMode = 2 // update EXISTING
+)
 
 func (kv *KV) Open() error {
 	if err := kv.log.Open(); err != nil {
@@ -43,15 +50,16 @@ func (kv *KV) Get(key []byte) (val []byte, ok bool, err error) {
 }
 
 func (kv *KV) Set(key []byte, val []byte) (updated bool, err error) {
-	prevVal, existed := kv.mem[string(key)]
-	updated = !existed || !bytes.Equal(prevVal,val)
-	if updated {
-		if err = kv.log.Write(&Entry{key: key,val: val, deleted: false}); err != nil {
-			return false, err 
-		}
-		kv.mem[string(key)] = val
-	}
-	return
+	return kv.SetEx(key,val,ModeUpsert)
+	// prevVal, existed := kv.mem[string(key)]
+	// updated = !existed || !bytes.Equal(prevVal,val)
+	// if updated {
+	// 	if err = kv.log.Write(&Entry{key: key,val: val, deleted: false}); err != nil {
+	// 		return false, err 
+	// 	}
+	// 	kv.mem[string(key)] = val
+	// }
+	// return
 }
 
 func (kv *KV) Del(key []byte) (deleted bool, err error) {
@@ -63,5 +71,27 @@ func (kv *KV) Del(key []byte) (deleted bool, err error) {
 		delete(kv.mem, string(key))
 	}
 	return
+
+}
+
+func (kv *KV) SetEx(key []byte, val []byte, mode updateMode) (updating bool, err error) {
+	prevVal, existed := kv.mem[string(key)]
+	switch mode{
+	case ModeUpsert:
+		updating = !existed || !bytes.Equal(prevVal,val)
+	case ModeInsert:
+		updating = !existed
+	case ModeUpdate:
+		updating = existed && !bytes.Equal(prevVal,val)
+	default:
+		panic("NOT A VALID UPDATE MODE")
+	}
+	if updating {
+			if err := kv.log.Write(&Entry{key: key,val: val, deleted: false}); err != nil {
+				return false, err 
+			}
+			kv.mem[string(key)] = val
+	}
+	return updating, nil
 
 }
