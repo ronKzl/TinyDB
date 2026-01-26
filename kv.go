@@ -51,15 +51,6 @@ func (kv *KV) Get(key []byte) (val []byte, ok bool, err error) {
 
 func (kv *KV) Set(key []byte, val []byte) (updated bool, err error) {
 	return kv.SetEx(key,val,ModeUpsert)
-	// prevVal, existed := kv.mem[string(key)]
-	// updated = !existed || !bytes.Equal(prevVal,val)
-	// if updated {
-	// 	if err = kv.log.Write(&Entry{key: key,val: val, deleted: false}); err != nil {
-	// 		return false, err 
-	// 	}
-	// 	kv.mem[string(key)] = val
-	// }
-	// return
 }
 
 func (kv *KV) Del(key []byte) (deleted bool, err error) {
