@@ -1,5 +1,9 @@
 package kvdb
 
+import (
+	"strings"
+)
+
 type Parser struct {
 	buf string
 	pos int
@@ -48,26 +52,46 @@ func (p *Parser) isEnd() bool {
 	return p.pos >= len(p.buf)
 }
 
-func (p *Parser) tryKeyword(kw string) bool{
+func (p *Parser) tryKeyword(kw string) bool {
+	initialPos := p.pos
 	p.skipSpaces()
 
+	if len(p.buf) - p.pos < len(kw) {
+		p.pos = initialPos
+		return false
+	}
 
+	startPos := p.pos
+	endPos := startPos+len(kw)
 
-	return true  
+	if !strings.EqualFold(p.buf[startPos:endPos], kw) {
+		p.pos = initialPos
+		return false
+	}
+
+	if endPos < len(p.buf) && !isSpace(p.buf[endPos]) && !isSeparator(p.buf[endPos]){
+		p.pos = initialPos
+		return false
+	}
+	
+	p.pos = endPos
+	return true
 
 }
 
-func (p *Parser) tryName() (string, bool){
+func (p *Parser) tryName() (string, bool) {
+	initialPos := p.pos
 	p.skipSpaces()
-	start_pos := p.pos
+	startPos := p.pos
 
-	if !isNameStart(p.buf[p.pos]){
+	if !isNameStart(p.buf[p.pos]) {
+		p.pos = initialPos
 		return "", false
 	}
 
-	for isNameContinue(p.buf[p.pos]){
+	for p.pos < len(p.buf) && isNameContinue(p.buf[p.pos]) {
 		p.pos += 1
 	}
-	
-	return p.buf[start_pos:p.pos], true
+
+	return p.buf[startPos:p.pos], true
 }

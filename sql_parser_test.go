@@ -18,9 +18,10 @@ func TestParseName(t *testing.T) {
 }
 
 func TestParseKeyword(t *testing.T) {
-	p := NewParser(" select  HELLO ")
+	p := NewParser(" select  From HELLO ")
 	assert.False(t, p.tryKeyword("sel"))
 	assert.True(t, p.tryKeyword("SELECT"))
+	assert.True(t, p.tryKeyword("from"))
 	assert.True(t, p.tryKeyword("hello") && p.isEnd())
 }
 
