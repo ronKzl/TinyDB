@@ -11,6 +11,17 @@ type Parser struct {
 	pos int
 }
 
+type StmtSelect struct {
+	table string
+	cols  []string
+	keys  []NamedCell
+}
+
+type NamedCell struct {
+	column string
+	value  Cell
+}
+
 func NewParser(s string) Parser {
 	return Parser{buf: s, pos: 0}
 }
@@ -79,6 +90,15 @@ func (p *Parser) tryKeyword(kw string) bool {
 	p.pos = endPos
 	return true
 
+}
+
+func (p *Parser) tryPunctuation(tok string) bool {
+	p.skipSpaces()
+	if !(p.pos+len(tok) <= len(p.buf) && p.buf[p.pos:p.pos+len(tok)] == tok) {
+		return false
+	}
+	p.pos += len(tok)
+	return true
 }
 
 func (p *Parser) tryName() (string, bool) {
@@ -150,7 +170,6 @@ func (p *Parser) parseString(out *Cell) error{
 func (p *Parser) parseInt(out *Cell) (err error){
 	start := p.pos
 	cur := p.pos + 1
-	
 	if cur >= len(p.buf) || !isDigit(p.buf[cur]) { return errors.New("Invalid Integer")}
 
 	for cur < len(p.buf) && isDigit(p.buf[cur]){
@@ -165,4 +184,72 @@ func (p *Parser) parseInt(out *Cell) (err error){
 	}
 	out.I64 = int64(val)
 	return nil
+}
+
+func (p *Parser) parseEqual(out *NamedCell) error {
+	var ok bool
+	out.column, ok = p.tryName()
+	if !ok {
+		return errors.New("expect column")
+	}
+	if !p.tryPunctuation("=") {
+		return errors.New("expect =")
+	}
+
+	return p.parseValue(&out.value)
+}
+
+
+func (p *Parser) parseSelect(out *StmtSelect) error {
+	if !p.tryKeyword("SELECT") {
+		return errors.New("expect keyword SELECT")
+	}
+	
+	for !p.tryKeyword("FROM") {
+		if len(out.cols) > 0 && !p.tryPunctuation(",") {
+			return errors.New("expect comma")
+		}
+		if name, ok := p.tryName(); ok {
+			out.cols = append(out.cols, name)
+		} else {
+			return errors.New("expect column")
+		}
+	}
+
+	if len(out.cols) == 0 {
+		return errors.New("expect colum list")
+	}
+
+	var ok bool 
+
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("expect table name")
+	}
+
+	return p.parseWhere(&out.keys)
+}
+
+// TODO
+// we got the keys
+/// SELECT a,b,c,...,z FROM tableName WHERE a = 1 AND b = 2 AND ... z = 3
+// list can be a,b,c 	NEED TO keep verifying that all keys selected is the ones used!
+func (p *Parser) parseWhere(out *[]NamedCell) error  {
+	if !p.tryKeyword("WHERE") {
+		return errors.New("expect keyword WHERE")
+	}
+
+	for !p.tryPunctuation(";") {
+		
+		var res NamedCell
+		if err := p.parseEqual(&res); err != nil {
+			return err
+		}
+		*out = append(*out,res)
+		if p.pos < len(p.buf) && !p.tryPunctuation("AND") {
+			return errors.New("expect AND")
+		}		
+	}
+
+
+	return nil 
 }
