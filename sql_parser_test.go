@@ -2,6 +2,7 @@ package kvdb
 
 import (
 	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -72,4 +73,16 @@ func TestParseStmt(t *testing.T) {
 
 	s = "select a, b_02 from T where c = 1 and d = 'e' ; "
 	testParseSelect(t, s, stmt)
+
+	s = "select a,b_02 from T where c='b' and d='e';"
+	stmt = StmtSelect{
+		table: "T",
+		cols:  []string{"a", "b_02"},
+		keys: []NamedCell{
+			{column: "c", value: Cell{Type: TypeStr, Str: []byte("b")}},
+			{column: "d", value: Cell{Type: TypeStr, Str: []byte("e")}},
+		},
+	}
+	testParseSelect(t, s, stmt)
+
 }
