@@ -377,9 +377,32 @@ func (p *Parser) parseCreateTable(out *StmtCreatTable) error {
 }
 
 func (p *Parser) parseInsert(out *StmtInsert) error {
-	return nil 
+	var ok bool 
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("INSERT INTO: error parsing table name")
+	}
 
+	if ok = p.tryKeyword("VALUES"); !ok {
+		return errors.New("INSERT INTO: missing VALUES declaration")
+	}
 
+	if ok = p.tryPunctuation("("); !ok {
+		return errors.New("INSERT INTO: missing ( bracket in value declaration")
+	}
+
+	for !p.tryPunctuation(")") {
+		var cell Cell
+		if err := p.parseValue(&cell); err != nil {
+			return err
+		}
+		out.value = append(out.value, cell)
+		p.tryPunctuation(",")
+	}
+	
+	if ok = p.tryPunctuation(";"); !ok {
+		return errors.New("INSERT INTO: missing ;")
+	}
+	return nil
 }
 
 func (p *Parser) parseUpdate(out *StmtUpdate) error {
