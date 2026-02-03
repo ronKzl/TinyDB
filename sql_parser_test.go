@@ -115,6 +115,13 @@ func TestParseStmt(t *testing.T) {
 	}
 	testParseStmt(t, s, stmt)
 
+	s = "delete from t where c = \"banana\" and d = 4;"
+	stmt = &StmtDelete{
+		table: "t",
+		keys:  []NamedCell{{"c", Cell{Type: TypeStr, Str: []byte("banana")}}, {"d", Cell{Type: TypeI64, I64: 4}}},
+	}
+	testParseStmt(t, s, stmt)
+
 
 	s = "create table t (a string, b int64, c int64, primary key (b, c));"
 	stmt = &StmtCreatTable{

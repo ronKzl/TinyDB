@@ -435,6 +435,15 @@ func (p *Parser) parseUpdate(out *StmtUpdate) error {
 }
 
 func (p *Parser) parseDelete(out *StmtDelete) error {
+	var ok bool
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("DELETE: error parsing table name")
+	}
+
+	if err := p.parseWhere(&out.keys); err != nil {
+		return err 
+	}
+
 	return nil
 }
 
