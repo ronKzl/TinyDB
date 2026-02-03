@@ -88,8 +88,8 @@ func (p *Parser) isEnd() bool {
 }
 
 func (p *Parser) tryKeyword(kws ...string) bool {
+	initialPos := p.pos
 	for _, kw := range(kws) {
-		initialPos := p.pos
 		p.skipSpaces()
 		if len(p.buf)-p.pos < len(kw) {
 			p.pos = initialPos
@@ -111,31 +111,7 @@ func (p *Parser) tryKeyword(kws ...string) bool {
 
 		p.pos = endPos
 	}
-	//initialPos := p.pos
-	//p.skipSpaces()
-
-	//looking for 1 to n keywords
-
-	// if len(p.buf)-p.pos < len(kw) {
-	// 	p.pos = initialPos
-	// 	return false
-	// }
-
-	// startPos := p.pos
-	// endPos := startPos + len(kw)
-
-	// if !strings.EqualFold(p.buf[startPos:endPos], kw) {
-	// 	p.pos = initialPos
-	// 	return false
-	// }
-
-	// if endPos < len(p.buf) && !isSpace(p.buf[endPos]) && !isSeparator(p.buf[endPos]) {
-	// 	p.pos = initialPos
-	// 	return false
-	// }
-
-	// p.pos = endPos
-	// return true
+	
 	return true
 }
 
@@ -254,10 +230,6 @@ func (p *Parser) parseEqual(out *NamedCell) error {
 }
 
 func (p *Parser) parseSelect(out *StmtSelect) error {
-	// if !p.tryKeyword("SELECT") {
-	// 	return errors.New("expect keyword SELECT")
-	// }
-
 	for !p.tryKeyword("FROM") {
 		if len(out.cols) > 0 && !p.tryPunctuation(",") {
 			return errors.New("expect comma")
@@ -288,7 +260,7 @@ func (p *Parser) parseWhere(out *[]NamedCell) error {
 	}
 
 	for !p.tryPunctuation(";") {
-		if len(*out) > 0 && !p.tryPunctuation("and") {
+		if len(*out) > 0 && !p.tryKeyword("AND") {
 			return errors.New("expect AND")
 		}
 		var res NamedCell
@@ -399,7 +371,7 @@ func (p *Parser) parseInsert(out *StmtInsert) error {
 		p.tryPunctuation(",")
 	}
 	
-	if ok = p.tryPunctuation(";"); !ok {
+	if !p.tryPunctuation(";") {
 		return errors.New("INSERT INTO: missing ;")
 	}
 	return nil
@@ -426,12 +398,8 @@ func (p *Parser) parseUpdate(out *StmtUpdate) error {
 			break
 		}
 	}
-	
-	if err := p.parseWhere(&out.keys); err != nil {
-		return err
-	}
-	
-	return nil
+
+	return p.parseWhere(&out.keys)
 }
 
 func (p *Parser) parseDelete(out *StmtDelete) error {
@@ -439,12 +407,7 @@ func (p *Parser) parseDelete(out *StmtDelete) error {
 	if out.table, ok = p.tryName(); !ok {
 		return errors.New("DELETE: error parsing table name")
 	}
-
-	if err := p.parseWhere(&out.keys); err != nil {
-		return err 
-	}
-
-	return nil
+	return p.parseWhere(&out.keys)
 }
 
 func (p *Parser) parseStmt() (out interface{}, err error) {
