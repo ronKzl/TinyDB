@@ -406,6 +406,31 @@ func (p *Parser) parseInsert(out *StmtInsert) error {
 }
 
 func (p *Parser) parseUpdate(out *StmtUpdate) error {
+
+	var ok bool
+	if out.table, ok = p.tryName(); !ok {
+		return errors.New("UPDATE: error parsing table name")
+	}
+	
+	if !p.tryKeyword("SET") {
+		return errors.New("UPDATE: missing SET")
+	}
+	
+	for {
+		cel := NamedCell{}
+		if err := p.parseEqual(&cel); err != nil {
+			return err
+		}
+		out.value = append(out.value, cel)
+		if !p.tryPunctuation(","){
+			break
+		}
+	}
+	
+	if err := p.parseWhere(&out.keys); err != nil {
+		return err
+	}
+	
 	return nil
 }
 
