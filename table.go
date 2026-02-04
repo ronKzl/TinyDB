@@ -179,10 +179,9 @@ func (db *DB) GetSchema(table string) (Schema, error) {
 }
 
 func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error){
-	schema, ok := db.tables[stmt.table]
-
-	if !ok {
-		return nil, errors.New("Table under name " + stmt.table + " not found")
+	schema, err := db.GetSchema(stmt.table)
+	if err != nil {
+		return nil, err
 	}
 
 	indices, err := lookupColumns(schema.Cols, stmt.cols)
@@ -194,15 +193,86 @@ func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error){
 	if err != nil {
 		return nil, err
 	}
-
+	
+	if ok, err := db.Select(&schema,row); err != nil || !ok {
+		return nil, err
+	}
+	
 	row = subsetRow(row,indices)
 
-	
 	return []Row{row}, nil
 }
 
-func (db *DB) execInsert(stmt *StmtInsert) (count int, err error) {return 0, nil}
+func (db *DB) execInsert(stmt *StmtInsert) (count int, err error) {
+	
+	schema, err := db.GetSchema(stmt.table)
+	
+	if err != nil {
+		return 0, err
+	}
 
-func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error){return 0, nil}
+	if len(stmt.value) != len(schema.Cols) {
+		return count, errors.New("schema mismatch")
+	}
 
-func (db *DB) execDelete(stmt *StmtDelete) (count int, err error){return 0, nil}
+	for i := range(schema.Cols) {
+		if schema.Cols[i].Type != stmt.value[i].Type {
+			return count, errors.New("schema mismatch")
+		}
+	}
+
+	updated, err := db.Insert(&schema,stmt.value)
+	
+	if err != nil {
+		return 0, err
+	}
+	if updated {
+		count += 1
+	}
+	
+	return count, nil
+}
+
+func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error){
+	
+	// schema ,err := db.GetSchema(stmt.table)
+
+	// if err != nil {
+	// 	return count, err
+	// }
+	
+	// TODO: not allow updating PKs
+	
+
+	//db.Update(&schema,stmt.value)
+	
+	
+	return count, nil
+}
+
+func (db *DB) execDelete(stmt *StmtDelete) (count int, err error){
+	schema ,err := db.GetSchema(stmt.table)
+
+	if err != nil {
+		return count, err
+	}
+
+	row, err := makePKey(&schema, stmt.keys)
+
+	if err != nil {
+		return count, err 
+	}
+
+	updated, err := db.Delete(&schema,row)
+	
+	if err != nil {
+		return count, err
+	}
+
+	if updated {
+		count = count + 1
+	}
+	
+	return count, nil
+
+}
