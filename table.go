@@ -212,12 +212,12 @@ func (db *DB) execInsert(stmt *StmtInsert) (count int, err error) {
 	}
 
 	if len(stmt.value) != len(schema.Cols) {
-		return count, errors.New("schema mismatch")
+		return 0, errors.New("schema mismatch")
 	}
 
 	for i := range(schema.Cols) {
 		if schema.Cols[i].Type != stmt.value[i].Type {
-			return count, errors.New("schema mismatch")
+			return 0, errors.New("schema mismatch")
 		}
 	}
 
@@ -235,18 +235,52 @@ func (db *DB) execInsert(stmt *StmtInsert) (count int, err error) {
 
 func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error){
 	
-	// schema ,err := db.GetSchema(stmt.table)
+	schema ,err := db.GetSchema(stmt.table)
+	
+	if err != nil {
+		return 0, err
+	}
 
-	// if err != nil {
-	// 	return count, err
-	// }
+	row, err := makePKey(&schema, stmt.keys)
+	if err != nil {
+		return 0, err
+	}
 	
-	// TODO: not allow updating PKs
+	if ok, err := db.Select(&schema,row); err != nil || !ok {
+		return 0, err
+	}
 	
 
-	//db.Update(&schema,stmt.value)
+	for _, updatedValue := range(stmt.value) {
+		found := false
+		updatingIndex := 0
+		for idx, col := range(schema.Cols) {
+			if strings.EqualFold(updatedValue.column,col.Name) {
+				found = true
+				updatingIndex = idx
+				break
+			}
+		}
+		if !found {
+			return 0, errors.New("Attempting to update " + updatedValue.column + " not found in table")
+		}
+
+		for _, keyIndex := range(schema.PKey) {
+			if  updatingIndex == keyIndex {
+				return 0, errors.New("Updating a primary key is not allowed")
+			}
+		}
+		row[updatingIndex] = updatedValue.value
+	}
 	
-	
+	updated, err := db.Update(&schema,row)
+
+	if err != nil {
+		return 0, err
+	}
+	if updated {
+		count += 1
+	}
 	return count, nil
 }
 
@@ -254,23 +288,23 @@ func (db *DB) execDelete(stmt *StmtDelete) (count int, err error){
 	schema ,err := db.GetSchema(stmt.table)
 
 	if err != nil {
-		return count, err
+		return 0, err
 	}
 
 	row, err := makePKey(&schema, stmt.keys)
 
 	if err != nil {
-		return count, err 
+		return 0, err 
 	}
 
 	updated, err := db.Delete(&schema,row)
 	
 	if err != nil {
-		return count, err
+		return 0, err
 	}
 
 	if updated {
-		count = count + 1
+		count += 1
 	}
 	
 	return count, nil
