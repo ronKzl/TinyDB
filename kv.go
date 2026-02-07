@@ -7,7 +7,11 @@ import (
 
 type KV struct {
 	log Log
-	mem map[string][]byte
+	mem map[string][]byte // TODO: Remove
+	// * Refactoring from map to slices so I can implement comparison operations later
+	// * future note: currently all of the DB data needs to be loaded into memory ~ need to read up on ways to only have partial memory loaded
+	keys [][]byte
+	vals [][]byte 
 }
 
 type updateMode int 
@@ -19,6 +23,7 @@ const (
 )
 
 func (kv *KV) Open() error {
+	// TODO: Rework
 	if err := kv.log.Open(); err != nil {
 		return err
 	}
@@ -45,8 +50,10 @@ func (kv *KV) Open() error {
 func (kv *KV) Close() error { return kv.log.Close() }
 
 func (kv *KV) Get(key []byte) (val []byte, ok bool, err error) {
-	val, ok = kv.mem[string(key)]
-	return
+	if idx, found := BinarySearchFunc(kv.keys,key,bytes.Compare); found {
+		return kv.vals[idx], found, nil
+	}
+	return nil, false, nil 
 }
 
 func (kv *KV) Set(key []byte, val []byte) (updated bool, err error) {
@@ -54,6 +61,7 @@ func (kv *KV) Set(key []byte, val []byte) (updated bool, err error) {
 }
 
 func (kv *KV) Del(key []byte) (deleted bool, err error) {
+	// TODO: Rework
 	_, deleted = kv.mem[string(key)]
 	if deleted {
 		if err = kv.log.Write(&Entry{key: key, deleted: true}); err != nil {
@@ -66,6 +74,8 @@ func (kv *KV) Del(key []byte) (deleted bool, err error) {
 }
 
 func (kv *KV) SetEx(key []byte, val []byte, mode updateMode) (updating bool, err error) {
+	idx, existed := BinarySearchFunc(kv.keys,key,bytes.Compare)
+	// TODO: Rework
 	prevVal, existed := kv.mem[string(key)]
 	switch mode{
 	case ModeUpsert:
@@ -84,5 +94,4 @@ func (kv *KV) SetEx(key []byte, val []byte, mode updateMode) (updating bool, err
 			kv.mem[string(key)] = val
 	}
 	return updating, nil
-
 }
