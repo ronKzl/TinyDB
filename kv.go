@@ -3,6 +3,7 @@ package kvdb
 import (
 	"bytes"
 	"io"
+	"slices"
 )
 
 type KV struct {
@@ -61,16 +62,15 @@ func (kv *KV) Set(key []byte, val []byte) (updated bool, err error) {
 }
 
 func (kv *KV) Del(key []byte) (deleted bool, err error) {
-	// TODO: Rework
-	_, deleted = kv.mem[string(key)]
-	if deleted {
+	if idx, found := BinarySearchFunc(kv.keys,key,bytes.Compare); found {
 		if err = kv.log.Write(&Entry{key: key, deleted: true}); err != nil {
 			return false, err 
 		}
-		delete(kv.mem, string(key))
+		kv.keys = slices.Delete(kv.keys,idx,idx+1)
+		kv.vals = slices.Delete(kv.vals,idx,idx+1)
+		return true, nil 
 	}
-	return
-
+	return false, nil
 }
 
 func (kv *KV) SetEx(key []byte, val []byte, mode updateMode) (updating bool, err error) {
