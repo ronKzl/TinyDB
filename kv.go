@@ -13,6 +13,12 @@ type KV struct {
 	vals [][]byte
 }
 
+type KVIterator struct {
+	keys [][]byte
+	vals [][]byte
+	pos  int
+}
+
 type updateMode int
 
 const (
@@ -117,4 +123,33 @@ func (kv *KV) SetEx(key []byte, val []byte, mode updateMode) (updating bool, err
 		}
 	}
 	return updating, nil
+}
+
+func (kv *KV) Seek(key []byte) (*KVIterator, error) {
+	idx, _ := BinarySearchFunc(kv.keys,key,bytes.Compare)
+	return &KVIterator{keys: kv.keys, vals: kv.vals, pos: idx}, nil 
+}
+
+func (iter *KVIterator) Valid() bool {
+	return 0 <= iter.pos && iter.pos < len(iter.keys)
+}
+
+func (iter *KVIterator) Key() []byte {
+	return iter.keys[iter.pos]
+}
+func(iter *KVIterator) Val() []byte {
+	return iter.vals[iter.pos]
+}
+
+func(iter *KVIterator) Next() error {
+	if iter.pos < len(iter.keys) {
+		iter.pos += 1
+	}
+	return nil 
+}
+func(iter *KVIterator) Prev() error {
+	if iter.pos >= 0 {
+		iter.pos -= 1
+	}
+	return nil 
 }
