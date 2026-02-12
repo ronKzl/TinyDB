@@ -17,6 +17,13 @@ type SQLResult struct {
 	Values  []Row
 }
 
+type RowIterator struct {
+	schema *Schema
+	iter   *KVIterator
+	valid  bool
+	row    Row // decoded result
+}
+
 func (db *DB) Open() error {
 	db.tables = map[string]Schema{}
 	return db.KV.Open()
@@ -309,4 +316,53 @@ func (db *DB) execDelete(stmt *StmtDelete) (count int, err error){
 	
 	return count, nil
 
+}
+
+func (iter *RowIterator) Valid() bool { return iter.valid }
+
+func (iter *RowIterator) Row() Row { check(iter.valid); return iter.row }
+
+func (iter *RowIterator) Next() (err error) {
+	if err = iter.iter.Next(); err != nil {
+		return err
+	}
+	iter.valid, err = decodeKVIter(iter.schema, iter.iter, iter.row)
+	return err
+}
+
+func decodeKVIter(schema *Schema, iter *KVIterator, row Row) (bool, error) {
+	if !iter.Valid() {
+        return false, nil
+    }
+
+	err := row.DecodeKey(schema, iter.Key()); 
+	if err == ErrOutOfRange {
+		return false, nil
+	}
+	if err != nil {
+		return false, err 
+	}
+
+	if err := row.DecodeVal(schema, iter.Val()); err != nil {
+		return false, err
+	}
+
+	return true, nil 
+}
+
+func (db *DB) Seek(schema *Schema, row Row) (*RowIterator, error){
+
+	key := row.EncodeKey(schema)
+	iter, err := db.KV.Seek(key)
+	if err != nil {
+		return nil, err 
+	}
+
+	isValid, err := decodeKVIter(schema, iter, row)
+	
+	if err != nil {
+		return nil, err
+	}
+
+	return &RowIterator{schema: schema, iter: iter, row: row, valid: isValid}, nil 
 }

@@ -15,6 +15,8 @@ type Column struct {
 
 type Row []Cell
 
+var ErrOutOfRange = errors.New("out of range")
+
 func (schema *Schema) NewRow() Row {
 	return make(Row, len(schema.Cols))
 }
@@ -54,11 +56,11 @@ func (row Row) DecodeKey(schema *Schema, key []byte) (err error){
 	check(len(row) == len(schema.Cols))
 
 	if len(key) < len(schema.Table) + 1 {
-		return errors.New("Bad Key")
+		return ErrOutOfRange
 	}
 	
 	if string(key[:len((schema.Table))+1]) != schema.Table+"\x00"{
-		return errors.New("Bad Key")
+		return ErrOutOfRange
 	}
 
 	key = key[len((schema.Table))+1:]
