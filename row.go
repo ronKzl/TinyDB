@@ -26,7 +26,7 @@ func (row Row) EncodeKey(schema *Schema) (key []byte){
 	for _, primaryKey := range(schema.PKey) {
 		//check that the value in the cell conforms to the collumn type
 		check(schema.Cols[primaryKey].Type == row[primaryKey].Type)
-		key = row[primaryKey].Encode(key)
+		key = row[primaryKey].EncodeKey(key)
 	}
 	return key
 }
@@ -44,7 +44,7 @@ func (row Row) EncodeVal(schema *Schema) (val []byte){
 		_, ok := set[index]
 		if !ok {
 			check(value.Type == schema.Cols[index].Type)
-			val = value.Encode(val)
+			val = value.EncodeVal(val)
 		}
 	}
 	return val 
@@ -65,7 +65,7 @@ func (row Row) DecodeKey(schema *Schema, key []byte) (err error){
 
 	for _, PKI := range(schema.PKey){
 		cell := Cell{Type: schema.Cols[PKI].Type}
-		leftOverStream, err := cell.Decode(key) 
+		leftOverStream, err := cell.DecodeKey(key) 
 		if err != nil {return err}
 		key = leftOverStream
 		row[PKI] = cell
@@ -91,7 +91,7 @@ func (row Row) DecodeVal(schema *Schema, val []byte) (err error){
 		_, PK := set[index]
 		if !PK {
 			cell := Cell{Type: col.Type}
-			leftOverStream, err := cell.Decode(val)
+			leftOverStream, err := cell.DecodeVal(val)
 			if err != nil {
 				return err 
 			}
