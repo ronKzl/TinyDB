@@ -8,39 +8,49 @@ import (
 
 type CellType uint8
 
+// CellType represents the supported data types for database cells.
 const (
-	TypeI64 CellType = 1
-	TypeStr CellType = 2
+	TypeI64 CellType = 1 // 64-bit signed integer
+	TypeStr CellType = 2 // Variable-length string/byte slice
 )
 
+// nullTerminator marks the end of an encoded string key.
 const nullTerminator = 0x00
+
+// escapeChar is used to escape null bytes within string keys to maintain sort order.
 const escapeChar = 0x01
 
+// Cell represents a single data unit in a database row. It stores both the
+// type metadata and the actual value (int64 or byte slice).
 type Cell struct {
 	Type CellType
 	I64  int64
 	Str  []byte
 }
 
-
+// encodeStrKey serializes a byte slice into an order preserving format.
+// It escapes null bytes and the escape character to ensure the resulting
+// slice can be safely compared lexicographically.
 func encodeStrKey(toAppend []byte, input []byte) []byte {
-	for _, chr := range(input) {
+	for _, chr := range input {
 		if chr == nullTerminator || chr == escapeChar {
 			toAppend = append(toAppend, escapeChar, chr+1)
-		}else {
+		} else {
 			toAppend = append(toAppend, chr)
 		}
 	}
 	return append(toAppend, nullTerminator)
 }
 
-func decodeStrKey(data []byte) (out []byte, rest []byte, err error){
-	escape := false 
-	for idx, chr := range(data) {
+// decodeStrKey deserializes an order preserving byte slice back into its original
+// form. It returns the decoded string and the remaining bytes in the stream.
+func decodeStrKey(data []byte) (out []byte, rest []byte, err error) {
+	escape := false
+	for idx, chr := range data {
 		if !escape {
 			if chr == nullTerminator {
-				return out, data[idx+1:], nil 
-			} 
+				return out, data[idx+1:], nil
+			}
 			if chr == escapeChar {
 				escape = true
 				continue
@@ -55,20 +65,25 @@ func decodeStrKey(data []byte) (out []byte, rest []byte, err error){
 	return nil, data, errors.New("data not null terminated")
 }
 
-
+// EncodeKey serializes the Cell into a byte slice that preserves the natural
+// sort order of the data. Integers are encoded in Big-Endian with the sign
+// bit flipped to ensure negative numbers sort before positive ones.
 func (cell *Cell) EncodeKey(toAppend []byte) []byte {
-	switch cell.Type{
+	switch cell.Type {
 	case TypeI64:
-		return binary.BigEndian.AppendUint64(toAppend, uint64(cell.I64)^(1 << 63))
+		// Flip the MSB (sign bit) to make signed integers sortable as unsigned bytes.
+		return binary.BigEndian.AppendUint64(toAppend, uint64(cell.I64)^(1<<63))
 	case TypeStr:
-		return encodeStrKey(toAppend,cell.Str)
+		return encodeStrKey(toAppend, cell.Str)
 	default:
 		panic("Can't be encoded")
 	}
 }
 
+// DecodeKey parses an order preserving byte slice and populates the Cell.
+// It returns the remaining unparsed bytes in the stream.
 func (cell *Cell) DecodeKey(data []byte) (rest []byte, err error) {
-	switch cell.Type{
+	switch cell.Type {
 	case TypeI64:
 		if len(data) < lengthSize {
 			return data, errors.New("Expected more data")
@@ -83,6 +98,8 @@ func (cell *Cell) DecodeKey(data []byte) (rest []byte, err error) {
 	}
 }
 
+// EncodeVal serializes the Cell into a compact binary format for storage.
+// It uses Little-Endian for integers and length-prefixed encoding for strings.
 func (cell *Cell) EncodeVal(toAppend []byte) []byte {
 	switch cell.Type {
 	case TypeI64:
@@ -95,6 +112,8 @@ func (cell *Cell) EncodeVal(toAppend []byte) []byte {
 	}
 }
 
+// DecodeVal parses a serialized value byte slice and populates the Cell.
+// It returns the remaining unparsed bytes in the stream.
 func (cell *Cell) DecodeVal(data []byte) (rest []byte, err error) {
 	switch cell.Type {
 	case TypeI64:
