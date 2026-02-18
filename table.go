@@ -21,13 +21,30 @@ type SQLResult struct {
 	Values  []Row
 }
 
-// RowIterator wraps a KVIterator to provide a relational view of the data.
+// RowIterator wraps a RangedKVIter to provide a relational view of the data.
 // It handles decoding raw bytes into structured Rows and tracking table boundaries.
 type RowIterator struct {
 	schema *Schema
-	iter   *KVIterator
+	iter   *RangedKVIter
 	valid  bool
 	row    Row
+}
+
+type ExprOp uint8
+
+const (
+	OP_LE ExprOp = 12 // <= smaller then or equal
+	OP_GE ExprOp = 13 // >= greater then or equal
+	OP_LT ExprOp = 14 // < smaller then
+	OP_GT ExprOp = 15 // > greater then
+)
+
+// RangeReq defines the boundaries and comparison operators for a table scan
+type RangeReq struct {
+	StartCmp ExprOp // Comparison for the start boundary (e.g., OP_GE)
+	StopCmp  ExprOp // Comparison for the stop boundary (e.g., OP_LE)
+	Start    []Cell // Start primary key or prefix
+	Stop     []Cell // Stop primary key or prefix
 }
 
 // Open initializes the DB struct and calls Open on KV database
@@ -369,7 +386,7 @@ func (iter *RowIterator) Next() (err error) {
 
 // decodeKVIter is a helper that attempts to decode the current KV pair into the provided row.
 // It returns false if the iterator has reached the end of the KV store or a different table prefix.
-func decodeKVIter(schema *Schema, iter *KVIterator, row Row) (bool, error) {
+func decodeKVIter(schema *Schema, iter *RangedKVIter, row Row) (bool, error) {
 	if !iter.Valid() {
 		return false, nil
 	}
@@ -389,23 +406,58 @@ func decodeKVIter(schema *Schema, iter *KVIterator, row Row) (bool, error) {
 	return true, nil
 }
 
-// Seek positions a database cursor at the first row greater than or equal to the provided key.
-//
-// The provided row serves as both the search key and the internal result buffer.
-// If the starting position is outside the table, the returned iterator's Valid() method will return false.
+// Seek positions a RowIterator at the first record greater than or equal to the search key.
+// It uses the provided Row to extract primary key columns and performs an ascending scan.
 func (db *DB) Seek(schema *Schema, row Row) (*RowIterator, error) {
 
-	key := row.EncodeKey(schema)
-	iter, err := db.KV.Seek(key)
+	start := make([]Cell, len(schema.PKey))
+
+	for idx, PK := range schema.PKey {
+		check(row[PK].Type == schema.Cols[PK].Type)
+		start[idx] = row[PK]
+	}
+
+	// OP_GE is used to find the start and OP_LE as a stop to scan to the table end.
+	rangeReq := &RangeReq{StartCmp: OP_GE, StopCmp: OP_LE, Start: start, Stop: nil}
+	rowIter, err := db.Range(schema, rangeReq)
+
+	return rowIter, err
+}
+
+// suffixPositive returns true if the operator requires positive infinity padding (0xff).
+// This is used for <= and > to ensure the boundary includes all possible key suffixes.
+func suffixPositive(compareOperation ExprOp) bool {
+	if compareOperation == OP_LE || compareOperation == OP_GT {
+		return true
+	}
+	return false
+}
+
+// isDescending returns true if the operator implies a backward scan (<= or <).
+func isDescending(compareOperation ExprOp) bool {
+	if compareOperation == OP_LE || compareOperation == OP_LT {
+		return true
+	}
+	return false
+}
+
+// Range returns a RowIterator for the specified boundaries and scan direction.
+// It bootstraps the iterator by decoding the first valid KV pair into a Row.
+func (db *DB) Range(schema *Schema, req *RangeReq) (*RowIterator, error) {
+	start := EncodeKeyPrefix(schema, req.Start, suffixPositive(req.StartCmp))
+	stop := EncodeKeyPrefix(schema, req.Stop, suffixPositive(req.StopCmp))
+	desc := isDescending(req.StartCmp)
+	iter, err := db.KV.Range(start, stop, desc)
+
 	if err != nil {
 		return nil, err
 	}
+	row := schema.NewRow()
 
 	isValid, err := decodeKVIter(schema, iter, row)
-
 	if err != nil {
 		return nil, err
 	}
 
-	return &RowIterator{schema: schema, iter: iter, row: row, valid: isValid}, nil
+	return &RowIterator{schema: schema, iter: iter, valid: isValid, row: row}, nil
 }

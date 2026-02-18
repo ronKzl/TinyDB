@@ -23,7 +23,7 @@ func TestRowEncode(t *testing.T) {
 		Cell{Type: TypeStr, Str: []byte("a")},
 		Cell{Type: TypeStr, Str: []byte("b")},
 	}
-	key := []byte{'l', 'i', 'n', 'k', 0, 'a', 0, 'b', 0}
+	key := []byte{'l', 'i', 'n', 'k', 0, 0x02, 'a', 0, 0x02, 'b', 0, 0x00}
 	val := []byte{123, 0, 0, 0, 0, 0, 0, 0}
 	assert.Equal(t, key, row.EncodeKey(schema))
 	assert.Equal(t, val, row.EncodeVal(schema))

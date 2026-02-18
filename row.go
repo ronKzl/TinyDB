@@ -2,7 +2,7 @@ package kvdb
 
 import "errors"
 
-// Schema defines the structure of a database table, composed of the table name, 
+// Schema defines the structure of a database table, composed of the table name,
 // a slice of columns, and a slice of primary key indices.
 type Schema struct {
 	Table string
@@ -30,7 +30,7 @@ func (schema *Schema) NewRow() Row {
 // EncodeKey serializes the primary key columns of the Row into an order-preserving byte slice.
 // It includes the table name and a null terminator as a prefix.
 //
-// Format: table_name 0x00 [Encoded Primary Keys...]
+// Format: table_name 0x00 [KEY_TYPE Encoded Primary Keys...] 0x00
 func (row Row) EncodeKey(schema *Schema) (key []byte) {
 	key = append(key, []byte(schema.Table)...)
 	key = append(key, 0x00)
@@ -38,9 +38,30 @@ func (row Row) EncodeKey(schema *Schema) (key []byte) {
 	for _, primaryKey := range schema.PKey {
 		//check that the value in the cell conforms to the column type
 		check(schema.Cols[primaryKey].Type == row[primaryKey].Type)
+		key = append(key, byte(row[primaryKey].Type)) // avoids 0xff collisions
 		key = row[primaryKey].EncodeKey(key)
 	}
+	return append(key, 0x00) // avoids negative infinity
+}
+
+// EncodeKeyPrefix serializes a partial primary key into an order-preserving byte slice.
+// It pads the resulting key with positive infinity (0xff) if positive is true, 
+// or negative infinity (implicit 0x00) if false, to establish scan boundaries.
+//
+// Format: table_name 0x00 [KEY_TYPE Encoded Primary Keys...] (0xff | 0x00)
+func EncodeKeyPrefix(schema *Schema, prefix []Cell, positive bool) []byte {
+	key := append([]byte(schema.Table), 0x00)
+
+	for idx, cell := range prefix {
+		check(cell.Type == schema.Cols[schema.PKey[idx]].Type)
+		key = append(key, byte(cell.Type)) // avoids 0xff collisions
+		key = cell.EncodeKey(key)
+	}
+	if positive {
+		key = append(key, 0xff) // +infinity
+	} // otherwise it will have a 0x00 which is -infinity
 	return key
+
 }
 
 // EncodeVal serializes the non-primary key columns of the Row into a byte slice.
@@ -82,6 +103,7 @@ func (row Row) DecodeKey(schema *Schema, key []byte) (err error) {
 
 	for _, PKI := range schema.PKey {
 		cell := Cell{Type: schema.Cols[PKI].Type}
+		key = key[1:] // for each key get rid of the prepending byte type
 		leftOverStream, err := cell.DecodeKey(key)
 		if err != nil {
 			return err
@@ -90,8 +112,8 @@ func (row Row) DecodeKey(schema *Schema, key []byte) (err error) {
 		row[PKI] = cell
 	}
 
-	if len(key) > 0 {
-		return errors.New("Trailing garbage detected")
+	if !(len(key) == 1 && key[0] == 0x00) {
+		return errors.New("Trailing garbage detected - key was not successfully closed.")
 	}
 
 	return nil
