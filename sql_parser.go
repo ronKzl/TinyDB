@@ -56,9 +56,92 @@ type StmtDelete struct {
 	keys  []NamedCell
 }
 
+type ExprBinOp struct {
+	op ExprOp
+	// Can be any type but I am using a string as column name, Cell for a constant, ExprBinOp for a nested expr.
+	left  interface{}
+	right interface{}
+}
+
+type ExprOp uint8
+
+const (
+	OP_ADD ExprOp = 1  // +
+	OP_SUB ExprOp = 2  // -
+	OP_LE  ExprOp = 12 // <= smaller then or equal
+	OP_GE  ExprOp = 13 // >= greater then or equal
+	OP_LT  ExprOp = 14 // <| smaller then
+	OP_GT  ExprOp = 15 // |> greater then
+)
+
 // NewParser allocates a Parser for a given input string.
 func NewParser(s string) Parser {
 	return Parser{buf: s, pos: 0}
+}
+
+// parseAtom parses a single operand, which can be either a column name (string) or a constant value (*Cell).
+func (p *Parser) parseAtom() (interface{}, error) {
+	if name, ok := p.tryName(); ok {
+		return name, nil
+	}
+	cell := &Cell{}
+	if err := p.parseValue(cell); err != nil {
+		return nil, err
+	}
+	return cell, nil
+}
+
+// mapOperators converts a string representation of an operator into its corresponding ExprOp type.
+func mapOperators(op string) ExprOp {
+	switch op {
+	case ">=":
+		return OP_GE
+	case "<=":
+		return OP_LE
+	case "+":
+		return OP_ADD
+	case "-":
+		return OP_SUB
+	case ">":
+		return OP_GT
+	case "<":
+		return OP_LT
+	default:
+		panic("non matching operator")
+	}
+}
+
+// parseAdd parses addition and subtraction expressions into a left-associative binary expression tree.
+func (p *Parser) parseAdd() (interface{}, error) {
+
+	var operators = []string{"+", "-"}
+
+	// accumulator
+	result, err := p.parseAtom()
+
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		found := false
+		for _, op := range operators {
+			if p.tryPunctuation(op) {
+				rightValue, err := p.parseAtom()
+				if err != nil {
+					return nil, err
+				}
+				result = &ExprBinOp{left: result, op: mapOperators(op), right: rightValue}
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			break
+		}
+	}
+	return result, nil
 }
 
 // isSpace is a helper function that determines whether the given byte is a space character.

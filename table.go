@@ -30,15 +30,6 @@ type RowIterator struct {
 	row    Row
 }
 
-type ExprOp uint8
-
-const (
-	OP_LE ExprOp = 12 // <= smaller then or equal
-	OP_GE ExprOp = 13 // >= greater then or equal
-	OP_LT ExprOp = 14 // < smaller then
-	OP_GT ExprOp = 15 // > greater then
-)
-
 // RangeReq defines the boundaries and comparison operators for a table scan
 type RangeReq struct {
 	StartCmp ExprOp // Comparison for the start boundary (e.g., OP_GE)
