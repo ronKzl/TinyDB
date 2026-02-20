@@ -56,6 +56,7 @@ type StmtDelete struct {
 	keys  []NamedCell
 }
 
+// ExprBinOp is a tree structure that holds the operations of an inputted user query
 type ExprBinOp struct {
 	op ExprOp
 	// Can be any type but I am using a string as column name, Cell for a constant, ExprBinOp for a nested expr.
