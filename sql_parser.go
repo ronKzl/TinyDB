@@ -69,6 +69,8 @@ type ExprOp uint8
 const (
 	OP_ADD ExprOp = 1  // +
 	OP_SUB ExprOp = 2  // -
+	OP_MUL ExprOp = 3  // *
+	OP_DIV ExprOp = 4  // //
 	OP_LE  ExprOp = 12 // <= smaller then or equal
 	OP_GE  ExprOp = 13 // >= greater then or equal
 	OP_LT  ExprOp = 14 // <| smaller then
@@ -80,8 +82,19 @@ func NewParser(s string) Parser {
 	return Parser{buf: s, pos: 0}
 }
 
-// parseAtom parses a single operand, which can be either a column name (string) or a constant value (*Cell).
-func (p *Parser) parseAtom() (interface{}, error) {
+// parseAtom parses a single operand, which can be either a parentheses expression,
+// a column name (string) or a constant value (*Cell).
+func (p *Parser) parseAtom() (expr interface{}, err error) {
+	// parentheses have highest precedence
+	if p.tryPunctuation("(") {
+		if expr, err = p.parseExpr(); err != nil {
+			return nil, err
+		}
+		if !p.tryPunctuation(")") {
+			return nil, errors.New("expect )")
+		}
+		return expr, nil
+	}
 	if name, ok := p.tryName(); ok {
 		return name, nil
 	}
@@ -103,6 +116,10 @@ func mapOperators(op string) ExprOp {
 		return OP_ADD
 	case "-":
 		return OP_SUB
+	case "*":
+		return OP_MUL
+	case "/":
+		return OP_DIV
 	case ">":
 		return OP_GT
 	case "<":
@@ -112,10 +129,47 @@ func mapOperators(op string) ExprOp {
 	}
 }
 
+// parseExpr parses a buffer expression according to (brackets, division, multiplication,addition, subtraction)
+// order of operations into a left-associative binary expression tree.
+func (p *Parser) parseExpr() (interface{}, error) {
+	return p.parseAdd()
+}
+
 // parseAdd parses addition and subtraction expressions into a left-associative binary expression tree.
 func (p *Parser) parseAdd() (interface{}, error) {
-
 	var operators = []string{"+", "-"}
+
+	// accumulator
+	result, err := p.parseMul()
+
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		found := false
+		for _, op := range operators {
+			if p.tryPunctuation(op) {
+				rightValue, err := p.parseMul()
+				if err != nil {
+					return nil, err
+				}
+				result = &ExprBinOp{left: result, op: mapOperators(op), right: rightValue}
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			break
+		}
+	}
+	return result, nil
+}
+
+// parseAdd parses multiplication and division expressions into a left-associative binary expression tree.
+func (p *Parser) parseMul() (interface{}, error) {
+	var operators = []string{"*", "/"}
 
 	// accumulator
 	result, err := p.parseAtom()

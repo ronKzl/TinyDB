@@ -127,12 +127,11 @@ func TestParseStmt(t *testing.T) {
 	}
 	testParseStmt(t, s, stmt)
 
-
 	s = "create table t (a string, b int64, c int64, primary key (b, c));"
 	stmt = &StmtCreatTable{
 		table: "t",
 		cols:  []Column{{"a", TypeStr}, {"b", TypeI64}, {"c", TypeI64}},
-		pkey:  []string{"b","c"},
+		pkey:  []string{"b", "c"},
 	}
 	testParseStmt(t, s, stmt)
 
@@ -142,7 +141,7 @@ func TestParseStmt(t *testing.T) {
 
 func testParseExpr(t *testing.T, s string, expr interface{}) {
 	p := NewParser(s)
-	out, err := p.parseAdd()
+	out, err := p.parseExpr()
 	require.Nil(t, err)
 	assert.Equal(t, expr, out)
 	assert.True(t, p.isEnd())
@@ -152,6 +151,7 @@ func TestParseExpr(t *testing.T) {
 	var expr interface{}
 
 	testParseExpr(t, "a", "a")
+	testParseExpr(t, "(a)", "a")
 	testParseExpr(t, "1", &Cell{Type: TypeI64, I64: 1})
 
 	s := "a + 1"
@@ -162,6 +162,33 @@ func TestParseExpr(t *testing.T) {
 	expr = &ExprBinOp{op: OP_SUB,
 		left:  &ExprBinOp{op: OP_ADD, left: "a", right: &Cell{Type: TypeI64, I64: 1}},
 		right: "b",
+	}
+	testParseExpr(t, s, expr)
+
+	s = "a + b * c"
+	expr = &ExprBinOp{op: OP_ADD,
+		left:  "a",
+		right: &ExprBinOp{op: OP_MUL, left: "b", right: "c"},
+	}
+	testParseExpr(t, s, expr)
+
+	s = "(a * b)"
+	expr = &ExprBinOp{op: OP_MUL, left: "a", right: "b"}
+	testParseExpr(t, s, expr)
+
+	s = "(a + b) / c"
+	expr = &ExprBinOp{op: OP_DIV,
+		left:  &ExprBinOp{op: OP_ADD, left: "a", right: "b"},
+		right: "c",
+	}
+	testParseExpr(t, s, expr)
+
+	s = "d * (a + (b - c)) / c"
+	expr = &ExprBinOp{op: OP_DIV,
+		left: &ExprBinOp{op: OP_MUL, left: "d",
+			right: &ExprBinOp{op: OP_ADD, left: "a",
+				right: &ExprBinOp{op: OP_SUB, left: "b", right: "c"}}},
+		right: "c",
 	}
 	testParseExpr(t, s, expr)
 }
