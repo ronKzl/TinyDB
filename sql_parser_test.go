@@ -191,4 +191,24 @@ func TestParseExpr(t *testing.T) {
 		right: "c",
 	}
 	testParseExpr(t, s, expr)
+
+	s = "not not - - a"
+	expr = &ExprUnOp{op: OP_NOT,
+		kid: &ExprUnOp{op: OP_NOT,
+			kid: &ExprUnOp{op: OP_NEG,
+				kid: &ExprUnOp{op: OP_NEG,
+					kid: "a"}}}}
+	testParseExpr(t, s, expr)
+
+	s = "f or e and not d = a + b * -c"
+	expr = &ExprBinOp{op: OP_OR,
+		left: "f", right: &ExprBinOp{op: OP_AND,
+			left: "e", right: &ExprUnOp{op: OP_NOT,
+				kid: &ExprBinOp{op: OP_EQ,
+					left: "d", right: &ExprBinOp{op: OP_ADD,
+						left: "a", right: &ExprBinOp{op: OP_MUL,
+							left: "b", right: &ExprUnOp{op: OP_NEG,
+								kid: "c"}}}}}}}
+	testParseExpr(t, s, expr)
+
 }

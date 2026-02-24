@@ -64,6 +64,12 @@ type ExprBinOp struct {
 	right interface{}
 }
 
+// ExprUnOp is a simple structure to express NOT x and -x operators having only a single child node.
+type ExprUnOp struct {
+	op  ExprOp      // OP_NEG or OP_NOT
+	kid interface{} // Can be any type, a Cell, variable, ExprUnOp or ExprBinOp
+}
+
 type ExprOp uint8
 
 const (
@@ -71,10 +77,16 @@ const (
 	OP_SUB ExprOp = 2  // -
 	OP_MUL ExprOp = 3  // *
 	OP_DIV ExprOp = 4  // //
+	OP_NEG ExprOp = 5  // -x
 	OP_LE  ExprOp = 12 // <= smaller then or equal
 	OP_GE  ExprOp = 13 // >= greater then or equal
 	OP_LT  ExprOp = 14 // <| smaller then
 	OP_GT  ExprOp = 15 // |> greater then
+	OP_EQ  ExprOp = 16 // =
+	OP_NE  ExprOp = 17 // !=/ <>
+	OP_OR  ExprOp = 50 // OR
+	OP_AND ExprOp = 51 // AND
+	OP_NOT ExprOp = 52 // NOT
 )
 
 // NewParser allocates a Parser for a given input string.
@@ -106,8 +118,9 @@ func (p *Parser) parseAtom() (expr interface{}, err error) {
 }
 
 // mapOperators converts a string representation of an operator into its corresponding ExprOp type.
+// TODO: tech debt to refactor - potentially if other operators are added in the future will just get ouf of control.
 func mapOperators(op string) ExprOp {
-	switch op {
+	switch strings.ToLower(op) {
 	case ">=":
 		return OP_GE
 	case "<=":
@@ -124,79 +137,115 @@ func mapOperators(op string) ExprOp {
 		return OP_GT
 	case "<":
 		return OP_LT
+	case "!=":
+		return OP_NE
+	case "<>":
+		return OP_NE
+	case "=":
+		return OP_EQ
+	case "or":
+		return OP_OR
+	case "and":
+		return OP_AND
+	case "not":
+		return OP_NOT
 	default:
 		panic("non matching operator")
 	}
 }
 
-// parseExpr parses a buffer expression according to (brackets, division, multiplication,addition, subtraction)
-// order of operations into a left-associative binary expression tree.
+// parseExpr parses a buffer expression according to
+// order of operations (from lowest to highest) into a left-associative binary expression tree.
 func (p *Parser) parseExpr() (interface{}, error) {
-	return p.parseAdd()
+	return p.parseOr()
 }
 
-// parseAdd parses addition and subtraction expressions into a left-associative binary expression tree.
+// parseBinOp is a generic helper that handles left-associative binary operators.
+// It accumulates expressions into a tree, ensuring that the operators provided
+// in the current level have lower precedence than those in the innerPrecedence call.
+func (p *Parser) parseBinOp(tokens []string, innerPrecedence func() (interface{}, error)) (interface{}, error) {
+	// accumulator
+	result, err := innerPrecedence()
+
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		found := false
+		for _, op := range tokens {
+			if !p.tryPunctuation(op) && !p.tryKeyword(op) {
+				continue
+			}
+
+			rightValue, err := innerPrecedence()
+			if err != nil {
+				return nil, err
+			}
+			result = &ExprBinOp{left: result, op: mapOperators(op), right: rightValue}
+			found = true
+			break
+
+		}
+
+		if !found {
+			break
+		}
+	}
+	return result, nil
+}
+
+// parseOr handles the logical OR operator, which has the lowest precedence level.
+func (p *Parser) parseOr() (interface{}, error) {
+	return p.parseBinOp([]string{"OR"}, p.parseAnd)
+}
+
+// parseAnd handles logical AND operations.
+func (p *Parser) parseAnd() (interface{}, error) {
+	return p.parseBinOp([]string{"AND"}, p.parseNot)
+}
+
+// parseNot handles the unary NOT operator. It is right-associative and
+// can be nested (e.g., NOT NOT a).
+func (p *Parser) parseNot() (expr interface{}, err error) {
+	if p.tryKeyword("NOT") {
+		if expr, err = p.parseNot(); err != nil {
+			return nil, err
+		}
+		return &ExprUnOp{op: OP_NOT, kid: expr}, nil
+	} else {
+		return p.parseCmp()
+	}
+}
+
+// parseCmp handles comparison operators like =, !=, <, and >.
+func (p *Parser) parseCmp() (interface{}, error) {
+	return p.parseBinOp(
+		[]string{"=", "!=", "<>", "<=", ">=", "<", ">"},
+		p.parseAdd)
+}
+
+// parseAdd handles addition and subtraction operations.
 func (p *Parser) parseAdd() (interface{}, error) {
-	var operators = []string{"+", "-"}
-
-	// accumulator
-	result, err := p.parseMul()
-
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		found := false
-		for _, op := range operators {
-			if p.tryPunctuation(op) {
-				rightValue, err := p.parseMul()
-				if err != nil {
-					return nil, err
-				}
-				result = &ExprBinOp{left: result, op: mapOperators(op), right: rightValue}
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			break
-		}
-	}
-	return result, nil
+	return p.parseBinOp([]string{"+", "-"}, p.parseMul)
 }
 
-// parseAdd parses multiplication and division expressions into a left-associative binary expression tree.
+// parseMul handles high-precedence arithmetic operators: multiplication and division.
 func (p *Parser) parseMul() (interface{}, error) {
-	var operators = []string{"*", "/"}
+	return p.parseBinOp([]string{"*", "/"}, p.parseNeg)
+}
 
-	// accumulator
-	result, err := p.parseAtom()
-
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		found := false
-		for _, op := range operators {
-			if p.tryPunctuation(op) {
-				rightValue, err := p.parseAtom()
-				if err != nil {
-					return nil, err
-				}
-				result = &ExprBinOp{left: result, op: mapOperators(op), right: rightValue}
-				found = true
-				break
-			}
+// parseNeg handles unary negation. It reports whether a negative sign is present
+// and recurses to handle cases like --a, otherwise it parses an atomic value.
+func (p *Parser) parseNeg() (expr interface{}, err error) {
+	if p.tryPunctuation("-") {
+		if expr, err = p.parseNeg(); err != nil {
+			return nil, err
 		}
-
-		if !found {
-			break
-		}
+		return &ExprUnOp{op: OP_NEG, kid: expr}, nil
+	} else {
+		return p.parseAtom()
 	}
-	return result, nil
 }
 
 // isSpace is a helper function that determines whether the given byte is a space character.
