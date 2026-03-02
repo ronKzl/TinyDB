@@ -60,7 +60,7 @@ func TestParseStmt(t *testing.T) {
 	s := "select a from t where c=1;"
 	stmt = &StmtSelect{
 		table: "t",
-		cols:  []string{"a"},
+		cols:  []interface{}{"a"},
 		keys:  []NamedCell{{column: "c", value: Cell{Type: TypeI64, I64: 1}}},
 	}
 	testParseStmt(t, s, stmt)
@@ -68,7 +68,7 @@ func TestParseStmt(t *testing.T) {
 	s = "select a,b_02 from T where c=1 and d='e' ;"
 	stmt = &StmtSelect{
 		table: "T",
-		cols:  []string{"a", "b_02"},
+		cols:  []interface{}{"a", "b_02"},
 		keys: []NamedCell{
 			{column: "c", value: Cell{Type: TypeI64, I64: 1}},
 			{column: "d", value: Cell{Type: TypeStr, Str: []byte("e")}},
@@ -82,7 +82,7 @@ func TestParseStmt(t *testing.T) {
 	s = "select a,b_02 from T where c='b' and d='e';"
 	stmt = &StmtSelect{
 		table: "T",
-		cols:  []string{"a", "b_02"},
+		cols:  []interface{}{"a", "b_02"},
 		keys: []NamedCell{
 			{column: "c", value: Cell{Type: TypeStr, Str: []byte("b")}},
 			{column: "d", value: Cell{Type: TypeStr, Str: []byte("e")}},
@@ -108,7 +108,7 @@ func TestParseStmt(t *testing.T) {
 	s = "update t set a = 1, b = 2 where c = 3 and d = 4;"
 	stmt = &StmtUpdate{
 		table: "t",
-		value: []NamedCell{{"a", Cell{Type: TypeI64, I64: 1}}, {"b", Cell{Type: TypeI64, I64: 2}}},
+		value: []ExprAssign{{"a", &Cell{Type: TypeI64, I64: 1}}, {"b", &Cell{Type: TypeI64, I64: 2}}},
 		keys:  []NamedCell{{"c", Cell{Type: TypeI64, I64: 3}}, {"d", Cell{Type: TypeI64, I64: 4}}},
 	}
 	testParseStmt(t, s, stmt)

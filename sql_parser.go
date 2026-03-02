@@ -13,10 +13,10 @@ type Parser struct {
 }
 
 // StmtSelect is a SELECT query struct.
-// It holds the table name as well as the NamedCell keys slice and the cols string slice.
+// It holds the table name as well as the NamedCell keys slice and the cols interface slice.
 type StmtSelect struct {
 	table string
-	cols  []string
+	cols  []interface{} // ExprUnOp | ExprBinOp | string | *Cell
 	keys  []NamedCell
 }
 
@@ -46,7 +46,14 @@ type StmtInsert struct {
 type StmtUpdate struct {
 	table string
 	keys  []NamedCell
-	value []NamedCell
+	value []ExprAssign
+}
+
+// ExprAssign is an assignment query struct.
+// It holds the column name as well as the expression assigned to that column.
+type ExprAssign struct {
+	column string
+	expr   interface{} // ExprUnOp | ExprBinOp | string | *Cell
 }
 
 // StmtDelete is a DELETE query struct.
@@ -466,11 +473,11 @@ func (p *Parser) parseSelect(out *StmtSelect) error {
 		if len(out.cols) > 0 && !p.tryPunctuation(",") {
 			return errors.New("expect comma")
 		}
-		if name, ok := p.tryName(); ok {
-			out.cols = append(out.cols, name)
-		} else {
-			return errors.New("expect column")
+		expr, err := p.parseExpr()
+		if err != nil {
+			return err
 		}
+		out.cols = append(out.cols, expr)
 	}
 
 	if len(out.cols) == 0 {
@@ -633,17 +640,33 @@ func (p *Parser) parseUpdate(out *StmtUpdate) error {
 	}
 
 	for {
-		cel := NamedCell{}
-		if err := p.parseEqual(&cel); err != nil {
+		expr := ExprAssign{}
+		if err := p.parseAssign(&expr); err != nil {
 			return err
 		}
-		out.value = append(out.value, cel)
+		out.value = append(out.value, expr)
 		if !p.tryPunctuation(",") {
 			break
 		}
 	}
 
 	return p.parseWhere(&out.keys)
+}
+
+// parseAssign attempts to parse a column name and an expression from the input buffer.
+//
+// If successful it will populate the passed in ExprAssign else will throw and error.
+func (p *Parser) parseAssign(out *ExprAssign) (err error) {
+	var ok bool
+	out.column, ok = p.tryName()
+	if !ok {
+		return errors.New("expect column")
+	}
+	if !p.tryPunctuation("=") {
+		return errors.New("expect =")
+	}
+	out.expr, err = p.parseExpr()
+	return err
 }
 
 // parseDelete attempts to parse the input buffer for a DELETE SQL statement structure.

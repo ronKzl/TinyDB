@@ -2,8 +2,8 @@ package kvdb
 
 import (
 	"os"
-	"testing"
 	"slices"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -259,3 +259,37 @@ func rangeQuery(sorted []int64, start int64, stop int64, desc bool) (out []int64
 	return out
 }
 
+func TestTableExpr(t *testing.T) {
+	db := DB{}
+	db.KV.log.FileName = ".test_db"
+	defer os.Remove(db.KV.log.FileName)
+
+	os.Remove(db.KV.log.FileName)
+	err := db.Open()
+	assert.Nil(t, err)
+	defer db.Close()
+
+	s := "create table t (a int64, b int64, c string, d string, primary key (d));"
+	_, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+
+	s = "insert into t values (1, 2, 'a', 'b');"
+	r, err := db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, 1, r.Updated)
+
+	s = "select a * 4 - b, d + c from t where d = 'b';"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{makeRow(2, "ba")}, r.Values)
+
+	s = "update t set a = a - b, b = a, c = d + c where d = 'b';"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, 1, r.Updated)
+
+	s = "select a, b, c, d from t where d = 'b';"
+	r, err = db.ExecStmt(parseStmt(t, s))
+	require.Nil(t, err)
+	require.Equal(t, []Row{makeRow(-1, 1, "ba", "b")}, r.Values)
+}

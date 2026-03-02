@@ -3,6 +3,7 @@ package kvdb
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -98,7 +99,7 @@ func (db *DB) ExecStmt(stmt interface{}) (r SQLResult, err error) {
 	case *StmtCreatTable:
 		err = db.execCreateTable(ptr)
 	case *StmtSelect:
-		r.Header = ptr.cols
+		r.Header = exprsToHeader(ptr.cols)
 		r.Values, err = db.execSelect(ptr)
 	case *StmtInsert:
 		r.Updated, err = db.execInsert(ptr)
@@ -221,12 +222,8 @@ func (db *DB) GetSchema(table string) (Schema, error) {
 // execSelect selects a specific row from the table given a StmtSelect.
 // It returns the specific row that matches the given key and any errors that occurred.
 func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
-	schema, err := db.GetSchema(stmt.table)
-	if err != nil {
-		return nil, err
-	}
 
-	indices, err := lookupColumns(schema.Cols, stmt.cols)
+	schema, err := db.GetSchema(stmt.table)
 	if err != nil {
 		return nil, err
 	}
@@ -240,9 +237,16 @@ func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
 		return nil, err
 	}
 
-	row = subsetRow(row, indices)
+	out := make(Row, len(stmt.cols))
+	for idx, expr := range stmt.cols {
+		cell, err := evalExpr(&schema, row, expr)
+		if err != nil {
+			return nil, err
+		}
+		out[idx] = *cell
+	}
 
-	return []Row{row}, nil
+	return []Row{out}, nil
 }
 
 // execInsert handles the logic for INSERT statements.
@@ -277,6 +281,31 @@ func (db *DB) execInsert(stmt *StmtInsert) (count int, err error) {
 	return count, nil
 }
 
+// fillNonPKey is a helper that attempts to populate a row in the table with the given updates slice, it will throw
+// an error if there is an attempt to update a table primary key or if one of the requested columns to update
+// is not found in the table schema.
+func fillNonPKey(schema *Schema, updates []NamedCell, out Row) error {
+	for _, expr := range updates {
+		found := false
+		updatingIndex := 0
+		for idx, col := range schema.Cols {
+			if strings.EqualFold(expr.column, col.Name) && expr.value.Type == col.Type {
+				found = true
+				updatingIndex = idx
+				break
+			}
+		}
+		if !found {
+			return errors.New("Attempting to update " + expr.column + " not found in table")
+		}
+		if slices.Contains(schema.PKey, updatingIndex) {
+			return errors.New("cannot update column its a PK")
+		}
+		out[updatingIndex] = expr.value
+	}
+	return nil
+}
+
 // execUpdate attempts to update a row corresponding to the provided statement.
 // It returns an error if the user attempts to update a primary key or a non-existent value.
 func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
@@ -296,26 +325,18 @@ func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
 		return 0, err
 	}
 
-	for _, updatedValue := range stmt.value {
-		found := false
-		updatingIndex := 0
-		for idx, col := range schema.Cols {
-			if strings.EqualFold(updatedValue.column, col.Name) {
-				found = true
-				updatingIndex = idx
-				break
-			}
-		}
-		if !found {
-			return 0, errors.New("Attempting to update " + updatedValue.column + " not found in table")
-		}
+	updates := make([]NamedCell, len(stmt.value))
 
-		for _, keyIndex := range schema.PKey {
-			if updatingIndex == keyIndex {
-				return 0, errors.New("Updating a primary key is not allowed")
-			}
+	for idx, assign := range stmt.value {
+		cell, err := evalExpr(&schema, row, assign.expr)
+		if err != nil {
+			return 0, err
 		}
-		row[updatingIndex] = updatedValue.value
+		updates[idx] = NamedCell{column: assign.column, value: *cell}
+	}
+
+	if err = fillNonPKey(&schema, updates, row); err != nil {
+		return 0, err
 	}
 
 	updated, err := db.Update(&schema, row)

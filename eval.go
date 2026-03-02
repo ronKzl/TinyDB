@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -12,7 +13,7 @@ import (
 // against a specific row. It returns the computed *Cell result or an error
 // if types are mismatched or columns are missing.
 //
-// TODO: Tech debt to split up functionality into multiple functions for readability. 
+// TODO: Tech debt to split up functionality into multiple functions for readability.
 func evalExpr(schema *Schema, row Row, expr interface{}) (*Cell, error) {
 	switch e := expr.(type) {
 	case string:
@@ -135,6 +136,85 @@ func evalExpr(schema *Schema, row Row, expr interface{}) (*Cell, error) {
 			return nil, errors.New("Unknown operator type")
 		}
 		return result, nil
+	default:
+		panic("unreachable")
+	}
+}
+
+// cellToStr returns the string representation of the value inside the cell.
+func cellToStr(cell *Cell) string {
+	switch cell.Type {
+	case TypeI64:
+		return strconv.FormatInt(cell.I64, 10)
+	case TypeStr:
+		return string(cell.Str)
+	default:
+		panic("unreachable")
+	}
+}
+
+// exprToStr converts an expression into a string.
+func exprToStr(expr interface{}) string {
+	switch e := expr.(type) {
+	case string:
+		return e
+	case *Cell:
+		return cellToStr(e)
+	case *ExprUnOp:
+		switch e.op {
+		case OP_NEG:
+			return "-" + exprToStr(e.kid)
+		case OP_NOT:
+			return "NOT " + exprToStr(e.kid)
+		default:
+			panic("unreachable")
+		}
+	case *ExprBinOp:
+		return "(" + exprToStr(e.left) + " " + opToStr(e.op) + " " + exprToStr(e.right) + ")"
+	default:
+		panic("unreachable")
+	}
+}
+
+// exprsToHeader converts columns stmtSelect columns structs into a strings for the result header.
+func exprsToHeader(cols []interface{}) (header []string) {
+	for _, expr := range cols {
+		header = append(header, exprToStr(expr))
+	}
+	return
+}
+
+// opToStr converts a ExprOp type representation of an operator into a string.
+func opToStr(op ExprOp) string {
+	switch op {
+	case OP_ADD:
+		return "+"
+	case OP_SUB:
+		return "-"
+	case OP_MUL:
+		return "*"
+	case OP_DIV:
+		return "/"
+	case OP_EQ:
+		return "="
+	case OP_NE:
+		return "!="
+	case OP_LE:
+		return "<="
+	case OP_GE:
+		return ">="
+	case OP_LT:
+		return "<"
+	case OP_GT:
+		return ">"
+	case OP_AND:
+		return "AND"
+	case OP_OR:
+		return "OR"
+	case OP_NOT:
+		return "NOT"
+	case OP_NEG:
+		return "-"
 	default:
 		panic("unreachable")
 	}
