@@ -17,7 +17,7 @@ type Parser struct {
 type StmtSelect struct {
 	table string
 	cols  []interface{} // ExprUnOp | ExprBinOp | string | *Cell
-	keys  []NamedCell
+	cond  interface{}
 }
 
 // NamedCell contains the column name and the Cell in that column.
@@ -45,7 +45,7 @@ type StmtInsert struct {
 // It holds the table name as well as slices for the keys and values being updated.
 type StmtUpdate struct {
 	table string
-	keys  []NamedCell
+	cond  interface{}
 	value []ExprAssign
 }
 
@@ -60,7 +60,7 @@ type ExprAssign struct {
 // It holds the table name as well as the keys meant for deletion.
 type StmtDelete struct {
 	table string
-	keys  []NamedCell
+	cond  interface{}
 }
 
 // ExprBinOp is a tree structure that holds the operations of an inputted user query
@@ -468,7 +468,7 @@ func (p *Parser) parseEqual(out *NamedCell) error {
 //
 // If successful it will populate the StmtSelect structure with the table name, db columns and db PKs.
 // Else will return an error to user to indicate that their query was formatted incorrectly.
-func (p *Parser) parseSelect(out *StmtSelect) error {
+func (p *Parser) parseSelect(out *StmtSelect) (err error) {
 	for !p.tryKeyword("FROM") {
 		if len(out.cols) > 0 && !p.tryPunctuation(",") {
 			return errors.New("expect comma")
@@ -490,32 +490,28 @@ func (p *Parser) parseSelect(out *StmtSelect) error {
 		return errors.New("expect table name")
 	}
 
-	return p.parseWhere(&out.keys)
+	out.cond, err = p.parseWhere()
+	return err
 }
 
 // parseWhere attempts to parse the WHERE clause of a SQL query in the buffer.
 //
 // If successful will populate the NameCell slice with all the columns and their respective values from the buffer.
-func (p *Parser) parseWhere(out *[]NamedCell) error {
+func (p *Parser) parseWhere() (expr interface{}, err error) {
 	if !p.tryKeyword("WHERE") {
-		return errors.New("expect keyword WHERE")
+		return nil, errors.New("expect keyword WHERE")
 	}
 
-	for !p.tryPunctuation(";") {
-		if len(*out) > 0 && !p.tryKeyword("AND") {
-			return errors.New("expect AND")
-		}
-		var res NamedCell
-		if err := p.parseEqual(&res); err != nil {
-			return err
-		}
-		*out = append(*out, res)
-	}
-	if len(*out) == 0 {
-		return errors.New("expect WHERE clause")
+	expr, err = p.parseExpr()
+	if err != nil {
+		return nil, err
 	}
 
-	return nil
+	if !p.tryPunctuation(";") {
+		return nil, errors.New("expect ;")
+	}
+
+	return expr, nil
 }
 
 // parseCreateTable attempts to parse the input buffer for a CREATE TABLE SQL statement structure.
@@ -628,7 +624,7 @@ func (p *Parser) parseInsert(out *StmtInsert) error {
 //
 // If successful it will populate the StmtUpdate structure with the table name, and NamedCell slice of the keys and values being updated.
 // Else will return an error to user to indicate that their query was formatted incorrectly.
-func (p *Parser) parseUpdate(out *StmtUpdate) error {
+func (p *Parser) parseUpdate(out *StmtUpdate) (err error) {
 
 	var ok bool
 	if out.table, ok = p.tryName(); !ok {
@@ -649,8 +645,11 @@ func (p *Parser) parseUpdate(out *StmtUpdate) error {
 			break
 		}
 	}
-
-	return p.parseWhere(&out.keys)
+	if len(out.value) == 0 {
+		return errors.New("UPDATE: expected assignment list")
+	}
+	out.cond, err = p.parseWhere()
+	return err
 }
 
 // parseAssign attempts to parse a column name and an expression from the input buffer.
@@ -673,12 +672,13 @@ func (p *Parser) parseAssign(out *ExprAssign) (err error) {
 //
 // If successful it will populate the StmtDelete structure with the table name, and NamedCell slice of the keys being deleted.
 // Else will return an error to user to indicate that their query was formatted incorrectly.
-func (p *Parser) parseDelete(out *StmtDelete) error {
+func (p *Parser) parseDelete(out *StmtDelete) (err error) {
 	var ok bool
 	if out.table, ok = p.tryName(); !ok {
 		return errors.New("DELETE: error parsing table name")
 	}
-	return p.parseWhere(&out.keys)
+	out.cond, err = p.parseWhere()
+	return err
 }
 
 // parseStmt is a helper function that tries to determine what the buffer query is in order to execute the appropriate

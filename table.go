@@ -160,6 +160,53 @@ func makePKey(schema *Schema, pkeys []NamedCell) (Row, error) {
 	return row, nil
 }
 
+// matchPKey attempts to match the user given query on an expression and
+// returns the keys and values from that expression as a row if possible.
+func matchPKey(schema *Schema, cond interface{}) (Row, error) {
+	if keys, ok := matchAllEq(cond, nil); ok {
+		return makePKey(schema, keys)
+	}
+	return nil, errors.New("unimplemented WHERE")
+}
+
+// matchAllEq detects expression like a = 123 AND b = 456 ... and returns
+// a single row with the key name and respective value.
+func matchAllEq(cond interface{}, out []NamedCell) ([]NamedCell, bool) {
+	binop, ok := cond.(*ExprBinOp)
+	if ok && binop.op == OP_AND {
+		if out, ok = matchAllEq(binop.left, out); !ok {
+			return nil, false
+		}
+
+		if out, ok = matchAllEq(binop.right, out); !ok {
+			return nil, false
+		}
+
+		return out, true
+	} else if ok && binop.op == OP_EQ {
+		left, right := binop.left, binop.right
+
+		// unknown if column name is is on left or right so try left first if not try right
+		colName, ok := left.(string)
+		if !ok { // not okay try to switcheroo
+			left, right = right, left
+			colName, ok = left.(string)
+		}
+
+		if !ok { // still not right return
+			return nil, false
+		}
+
+		cell, ok := right.(*Cell)
+		if !ok {
+			return nil, false
+		}
+		return append(out, NamedCell{column: colName, value: *cell}), true
+
+	}
+	return nil, false
+}
+
 // subsetRow is a helper that returns a subset of the provided Row consisting only of the given indices.
 func subsetRow(row Row, indices []int) (updated Row) {
 	for _, PKeyIndex := range indices {
@@ -228,7 +275,7 @@ func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
 		return nil, err
 	}
 
-	row, err := makePKey(&schema, stmt.keys)
+	row, err := matchPKey(&schema, stmt.cond)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +363,7 @@ func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
 		return 0, err
 	}
 
-	row, err := makePKey(&schema, stmt.keys)
+	row, err := matchPKey(&schema, stmt.cond)
 	if err != nil {
 		return 0, err
 	}
@@ -359,7 +406,7 @@ func (db *DB) execDelete(stmt *StmtDelete) (count int, err error) {
 		return 0, err
 	}
 
-	row, err := makePKey(&schema, stmt.keys)
+	row, err := matchPKey(&schema, stmt.cond)
 
 	if err != nil {
 		return 0, err

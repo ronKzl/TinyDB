@@ -61,7 +61,7 @@ func TestParseStmt(t *testing.T) {
 	stmt = &StmtSelect{
 		table: "t",
 		cols:  []interface{}{"a"},
-		keys:  []NamedCell{{column: "c", value: Cell{Type: TypeI64, I64: 1}}},
+		cond:  &ExprBinOp{op: OP_EQ, left: "c", right: &Cell{Type: TypeI64, I64: 1}},
 	}
 	testParseStmt(t, s, stmt)
 
@@ -69,9 +69,9 @@ func TestParseStmt(t *testing.T) {
 	stmt = &StmtSelect{
 		table: "T",
 		cols:  []interface{}{"a", "b_02"},
-		keys: []NamedCell{
-			{column: "c", value: Cell{Type: TypeI64, I64: 1}},
-			{column: "d", value: Cell{Type: TypeStr, Str: []byte("e")}},
+		cond: &ExprBinOp{op: OP_AND,
+			left:  &ExprBinOp{op: OP_EQ, left: "c", right: &Cell{Type: TypeI64, I64: 1}},
+			right: &ExprBinOp{op: OP_EQ, left: "d", right: &Cell{Type: TypeStr, Str: []byte("e")}},
 		},
 	}
 	testParseStmt(t, s, stmt)
@@ -83,9 +83,9 @@ func TestParseStmt(t *testing.T) {
 	stmt = &StmtSelect{
 		table: "T",
 		cols:  []interface{}{"a", "b_02"},
-		keys: []NamedCell{
-			{column: "c", value: Cell{Type: TypeStr, Str: []byte("b")}},
-			{column: "d", value: Cell{Type: TypeStr, Str: []byte("e")}},
+		cond: &ExprBinOp{op: OP_AND,
+			left:  &ExprBinOp{op: OP_EQ, left: "c", right: &Cell{Type: TypeStr, Str: []byte("b")}},
+			right: &ExprBinOp{op: OP_EQ, left: "d", right: &Cell{Type: TypeStr, Str: []byte("e")}},
 		},
 	}
 	testParseStmt(t, s, stmt)
@@ -109,21 +109,30 @@ func TestParseStmt(t *testing.T) {
 	stmt = &StmtUpdate{
 		table: "t",
 		value: []ExprAssign{{"a", &Cell{Type: TypeI64, I64: 1}}, {"b", &Cell{Type: TypeI64, I64: 2}}},
-		keys:  []NamedCell{{"c", Cell{Type: TypeI64, I64: 3}}, {"d", Cell{Type: TypeI64, I64: 4}}},
+		cond: &ExprBinOp{op: OP_AND,
+			left:  &ExprBinOp{op: OP_EQ, left: "c", right: &Cell{Type: TypeI64, I64: 3}},
+			right: &ExprBinOp{op: OP_EQ, left: "d", right: &Cell{Type: TypeI64, I64: 4}},
+		},
 	}
 	testParseStmt(t, s, stmt)
 
 	s = "delete from t where c = 3 and d = 4;"
 	stmt = &StmtDelete{
 		table: "t",
-		keys:  []NamedCell{{"c", Cell{Type: TypeI64, I64: 3}}, {"d", Cell{Type: TypeI64, I64: 4}}},
+		cond: &ExprBinOp{op: OP_AND,
+			left:  &ExprBinOp{op: OP_EQ, left: "c", right: &Cell{Type: TypeI64, I64: 3}},
+			right: &ExprBinOp{op: OP_EQ, left: "d", right: &Cell{Type: TypeI64, I64: 4}},
+		},
 	}
 	testParseStmt(t, s, stmt)
 
 	s = "delete from t where c = \"banana\" and d = 4;"
 	stmt = &StmtDelete{
 		table: "t",
-		keys:  []NamedCell{{"c", Cell{Type: TypeStr, Str: []byte("banana")}}, {"d", Cell{Type: TypeI64, I64: 4}}},
+		cond: &ExprBinOp{op: OP_AND,
+			left:  &ExprBinOp{op: OP_EQ, left: "c", right: &Cell{Type: TypeStr, Str: []byte("banana")}},
+			right: &ExprBinOp{op: OP_EQ, left: "d", right: &Cell{Type: TypeI64, I64: 4}},
+		},
 	}
 	testParseStmt(t, s, stmt)
 
