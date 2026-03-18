@@ -136,6 +136,8 @@ func evalExpr(schema *Schema, row Row, expr interface{}) (*Cell, error) {
 			return nil, errors.New("Unknown operator type")
 		}
 		return result, nil
+	case *ExprTuple:
+		return nil, errors.New("unimplemented")
 	default:
 		panic("unreachable")
 	}

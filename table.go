@@ -268,32 +268,34 @@ func (db *DB) GetSchema(table string) (Schema, error) {
 
 // execSelect selects a specific row from the table given a StmtSelect.
 // It returns the specific row that matches the given key and any errors that occurred.
-func (db *DB) execSelect(stmt *StmtSelect) ([]Row, error) {
+func (db *DB) execSelect(stmt *StmtSelect) (output []Row, err error) {
 
 	schema, err := db.GetSchema(stmt.table)
 	if err != nil {
 		return nil, err
 	}
 
-	row, err := matchPKey(&schema, stmt.cond)
+	iter, err := db.execCond(&schema, stmt.cond)
 	if err != nil {
 		return nil, err
 	}
 
-	if ok, err := db.Select(&schema, row); err != nil || !ok {
+	for ; err == nil && iter.Valid(); err = iter.Next() {
+		row := iter.Row()
+		computed := make(Row, len(stmt.cols))
+		for i, expr := range stmt.cols {
+			cell, err := evalExpr(&schema, row, expr)
+			if err != nil {
+				return nil, err
+			}
+			computed[i] = *cell
+		}
+		output = append(output, computed)
+	}
+	if err != nil {
 		return nil, err
 	}
-
-	out := make(Row, len(stmt.cols))
-	for idx, expr := range stmt.cols {
-		cell, err := evalExpr(&schema, row, expr)
-		if err != nil {
-			return nil, err
-		}
-		out[idx] = *cell
-	}
-
-	return []Row{out}, nil
+	return output, nil
 }
 
 // execInsert handles the logic for INSERT statements.
@@ -358,41 +360,39 @@ func fillNonPKey(schema *Schema, updates []NamedCell, out Row) error {
 func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
 
 	schema, err := db.GetSchema(stmt.table)
-
 	if err != nil {
 		return 0, err
 	}
 
-	row, err := matchPKey(&schema, stmt.cond)
+	iter, err := db.execCond(&schema, stmt.cond)
 	if err != nil {
 		return 0, err
 	}
 
-	if ok, err := db.Select(&schema, row); err != nil || !ok {
-		return 0, err
-	}
+	for ; err == nil && iter.Valid(); err = iter.Next() {
+		row := iter.Row()
 
-	updates := make([]NamedCell, len(stmt.value))
-
-	for idx, assign := range stmt.value {
-		cell, err := evalExpr(&schema, row, assign.expr)
+		updates := make([]NamedCell, len(stmt.value))
+		for i, assign := range stmt.value {
+			cell, err := evalExpr(&schema, row, assign.expr)
+			if err != nil {
+				return 0, err
+			}
+			updates[i] = NamedCell{column: assign.column, value: *cell}
+		}
+		if err = fillNonPKey(&schema, updates, row); err != nil {
+			return 0, err
+		}
+		updated, err := db.Update(&schema, row)
 		if err != nil {
 			return 0, err
 		}
-		updates[idx] = NamedCell{column: assign.column, value: *cell}
+		if updated {
+			count++
+		}
 	}
-
-	if err = fillNonPKey(&schema, updates, row); err != nil {
-		return 0, err
-	}
-
-	updated, err := db.Update(&schema, row)
-
 	if err != nil {
 		return 0, err
-	}
-	if updated {
-		count += 1
 	}
 	return count, nil
 }
@@ -401,29 +401,29 @@ func (db *DB) execUpdate(stmt *StmtUpdate) (count int, err error) {
 // It constructs the primary key from the WHERE clause and removes the entry.
 func (db *DB) execDelete(stmt *StmtDelete) (count int, err error) {
 	schema, err := db.GetSchema(stmt.table)
-
 	if err != nil {
 		return 0, err
 	}
 
-	row, err := matchPKey(&schema, stmt.cond)
-
+	iter, err := db.execCond(&schema, stmt.cond)
 	if err != nil {
 		return 0, err
 	}
 
-	updated, err := db.Delete(&schema, row)
-
+	for ; err == nil && iter.Valid(); err = iter.Next() {
+		row := iter.Row()
+		updated, err := db.Delete(&schema, row)
+		if err != nil {
+			return 0, err
+		}
+		if updated {
+			count++
+		}
+	}
 	if err != nil {
 		return 0, err
 	}
-
-	if updated {
-		count += 1
-	}
-
 	return count, nil
-
 }
 
 // Valid reports whether the iterator is currently positioned at a valid row belonging to the table.
@@ -500,23 +500,231 @@ func isDescending(compareOperation ExprOp) bool {
 	return false
 }
 
+// execCond is the main entry point for the query optimizer.
+// It takes the raw WHERE condition, converts it into a fast RangeReq,
+// and immediately executes the scan to get an iterator.
+func (db *DB) execCond(schema *Schema, cond interface{}) (*RowIterator, error) {
+	// try to build a fast shortcut
+	req, err := makeRange(schema, cond)
+	if err != nil {
+		return nil, err
+	}
+	// execute a fast KV store scan using the shortcut
+	return db.Range(schema, req)
+}
+
+// extractPKey checks if the exact-match query actually uses the Primary Key.
+// If the PK is 'id', but the query is 'WHERE name', this will return false.
+func extractPKey(schema *Schema, pkey []NamedCell) (cells []Cell, ok bool) {
+	if len(schema.PKey) != len(pkey) {
+		return nil, false
+	}
+	for _, idx := range schema.PKey {
+		col := schema.Cols[idx]
+		i := slices.IndexFunc(pkey, func(e NamedCell) bool {
+			return col.Name == e.column && col.Type == e.value.Type
+		})
+		if i < 0 {
+			return nil, false
+		}
+		cells = append(cells, pkey[i].value)
+	}
+	return cells, true
+}
+
+// makeRange acts as the brain. It looks at the query and decides
+// what kind of fast scan to build (an exact match or a range).
+func makeRange(schema *Schema, cond interface{}) (*RangeReq, error) {
+	// case 1: this is an exact match (ex. id = 5)
+	if keys, ok := matchAllEq(cond, nil); ok {
+		// if it lines up perfectly with the primary key than a range struct for it
+		if pkey, ok := extractPKey(schema, keys); ok {
+			return &RangeReq{
+				StartCmp: OP_GE,
+				StopCmp:  OP_LE,
+				Start:    pkey,
+				Stop:     pkey,
+			}, nil
+		}
+	}
+	// case 2: this is a range ex 5 < id < 10
+	if req, ok := matchRange(schema, cond); ok {
+		return req, nil
+	}
+
+	// default can't optimize this type of query yet so fail
+	return nil, errors.New("unimplemented WHERE")
+}
+
 // Range returns a RowIterator for the specified boundaries and scan direction.
 // It bootstraps the iterator by decoding the first valid KV pair into a Row.
 func (db *DB) Range(schema *Schema, req *RangeReq) (*RowIterator, error) {
+	// turn the 'Start' and 'Stop' values into byte arrays for the KV store
 	start := EncodeKeyPrefix(schema, req.Start, suffixPositive(req.StartCmp))
 	stop := EncodeKeyPrefix(schema, req.Stop, suffixPositive(req.StopCmp))
 	desc := isDescending(req.StartCmp)
+	// call the lower level Key-Value store to actually get the data
 	iter, err := db.KV.Range(start, stop, desc)
 
 	if err != nil {
 		return nil, err
 	}
+	// create an empty row and decode the very first result into it
 	row := schema.NewRow()
 
 	isValid, err := decodeKVIter(schema, iter, row)
 	if err != nil {
 		return nil, err
 	}
-
+	
+	// return an iterator so the program can loop through all the results
 	return &RowIterator{schema: schema, iter: iter, valid: isValid, row: row}, nil
+}
+
+// asNameList turns a tree node into a list of strings (Column Names).
+// It handles single columns "id" or grouped tuples "(a, b)".
+func asNameList(expr interface{}) (out []string, ok bool) {
+	switch e := expr.(type) {
+	case string:
+		return []string{e}, true
+	case *ExprTuple:
+		for _, kid := range e.kids {
+			if s, ok := kid.(string); ok {
+				out = append(out, s)
+			} else {
+				return nil, false
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// asCellList turns a tree node into a list of Cells (Values).
+// It handles single values "5" or grouped tuples "(1, 2)".
+func asCellList(expr interface{}) (out []Cell, ok bool) {
+	switch e := expr.(type) {
+	case *Cell:
+		return []Cell{*e}, true
+	case *ExprTuple:
+		for _, kid := range e.kids {
+			if s, ok := kid.(*Cell); ok {
+				out = append(out, *s)
+			} else {
+				return nil, false
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// matchCmp tears apart a single inequality (like "id > 5").
+// It figures out the operator (>), the column names (id), and the values (5).
+func matchCmp(cond interface{}) (ExprOp, []string, []Cell, bool) {
+	binop, ok := cond.(*ExprBinOp)
+	if !ok {
+		return 0, nil, nil, false
+	}
+	switch binop.op {
+	// only care about greater-than or less-than here
+	case OP_LE, OP_GE, OP_LT, OP_GT:
+	default:
+		return 0, nil, nil, false
+	}
+
+	op := binop.op
+	left, right := binop.left, binop.right
+	// check if the left side is a column name.
+	names, ok := asNameList(left)
+	// if its not than normalize it to be left sided
+	if !ok {
+		left, right = right, left
+		names, ok = asNameList(left)
+		switch op {
+		case OP_LE:
+			op = OP_GE
+		case OP_GE:
+			op = OP_LE
+		case OP_LT:
+			op = OP_GT
+		case OP_GT:
+			op = OP_LT
+		}
+	}
+	if !ok {
+		return 0, nil, nil, false
+	}
+	// get the actual values from the right side
+	cells, ok := asCellList(right)
+	if !ok {
+		return 0, nil, nil, false
+	}
+	return op, names, cells, true
+}
+
+// isPKeyPrefix is a safety check. It ensures the program does not accidentally do a
+// fast range scan on a column that isn't sorted (not a primary key).
+func isPKeyPrefix(schema *Schema, cols []string, cells []Cell) bool {
+	if len(cols) != len(cells) || len(cols) > len(schema.Cols) {
+		return false
+	}
+	for i := range cols {
+		col := schema.Cols[schema.PKey[i]]
+		if col.Name != cols[i] || col.Type != cells[i].Type {
+			return false
+		}
+	}
+	return true
+}
+
+// matchRange looks for inequalities (>, <, >=, <=) and AND statements.
+func matchRange(schema *Schema, cond interface{}) (*RangeReq, bool) {
+	binop, ok := cond.(*ExprBinOp)
+	// case 1: It's an AND statement (e.g., id > 5 AND id < 10)
+	if ok && binop.op == OP_AND {
+		// parse the left side
+		op1, cols1, cells1, ok := matchCmp(binop.left)
+		if !ok || !isPKeyPrefix(schema, cols1, cells1) {
+			return nil, false
+		}
+		// parse the right side
+		op2, cols2, cells2, ok := matchCmp(binop.left)
+		if !ok || !isPKeyPrefix(schema, cols2, cells2) {
+			return nil, false
+		}
+		// making sure one of them is a start and the other is a stop
+		if isDescending(op1) != isDescending(op2) {
+			return nil, false
+		}
+		// if they are backwards than swap so start is always before a stop
+		if isDescending(op1) {
+			op1, op2, cells1, cells2 = op2, op1, cells2, cells1
+		}
+		// give back final bounds
+		return &RangeReq{
+			StartCmp: op1,
+			StopCmp:  op2,
+			Start:    cells1,
+			Stop:     cells2,
+		}, true
+		// case 2: It's a single condition (e.g., id > 5)
+	} else if ok {
+		op1, cols1, cells1, ok := matchCmp(cond)
+		if !ok || !isPKeyPrefix(schema, cols1, cells1) {
+			return nil, false
+		}
+		// only have a start, so its open bounded
+		op2 := OP_LE
+		if isDescending(op1) {
+			op2 = OP_GE
+		}
+		return &RangeReq{
+			StartCmp: op1,
+			StopCmp:  op2,
+			Start:    cells1,
+			Stop:     nil, //make sure to go until the end
+		}, true
+	}
+	return nil, false
 }

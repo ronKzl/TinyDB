@@ -77,6 +77,10 @@ type ExprUnOp struct {
 	kid interface{} // Can be any type, a Cell, variable, ExprUnOp or ExprBinOp
 }
 
+type ExprTuple struct {
+	kids []interface{}
+}
+
 type ExprOp uint8
 
 const (
@@ -106,13 +110,8 @@ func NewParser(s string) Parser {
 func (p *Parser) parseAtom() (expr interface{}, err error) {
 	// parentheses have highest precedence
 	if p.tryPunctuation("(") {
-		if expr, err = p.parseExpr(); err != nil {
-			return nil, err
-		}
-		if !p.tryPunctuation(")") {
-			return nil, errors.New("expect )")
-		}
-		return expr, nil
+		p.pos--
+		return p.parseTuple()
 	}
 	if name, ok := p.tryName(); ok {
 		return name, nil
@@ -122,6 +121,49 @@ func (p *Parser) parseAtom() (expr interface{}, err error) {
 		return nil, err
 	}
 	return cell, nil
+}
+
+// parseTuple parses tuple operands (a, b) into an populates the tree.
+func (p *Parser) parseTuple() (expr interface{}, err error) {
+	kids := []interface{}{}
+	err = p.parseCommaList(func() error {
+		expr, err := p.parseExpr()
+		if err != nil {
+			return err
+		}
+		kids = append(kids, expr)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(kids) == 0 {
+		return nil, errors.New("empty tuple")
+	} else if len(kids) == 1 {
+		return kids[0], nil
+	} else {
+		return &ExprTuple{kids}, nil
+	}
+
+}
+
+// parseCommaList tries to parse a list of comma separated values from the buffer,
+// takes in a function to call that will handle the correct value parsing.
+func (p *Parser) parseCommaList(item func() error) error {
+	if !p.tryPunctuation("(") {
+		return errors.New("expect (")
+	}
+	comma := false
+	for !p.tryPunctuation(")") {
+		if comma && !p.tryPunctuation(",") {
+			return errors.New("expect ,")
+		}
+		comma = true
+		if err := item(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mapOperators converts a string representation of an operator into its corresponding ExprOp type.
