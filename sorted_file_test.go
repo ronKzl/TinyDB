@@ -29,6 +29,7 @@ func TestSortedFile(t *testing.T) {
 	err := sf.CreateFromSorted(&SortedArray{keys, vals})
 	require.Nil(t, err)
 	defer sf.Close()
+	assert.Equal(t, 2, sf.Size())
 
 	expected := []byte{
 		2, 0, 0, 0, 0, 0, 0, 0,
@@ -40,4 +41,18 @@ func TestSortedFile(t *testing.T) {
 	data, err := os.ReadFile(sf.FileName)
 	require.Nil(t, err)
 	assert.Equal(t, expected, data)
+
+	i := 0
+	iter, err := sf.Iter()
+	for ; err == nil && iter.Valid(); err = iter.Next() {
+		assert.Equal(t, keys[i], iter.Key())
+		assert.Equal(t, vals[i], iter.Val())
+		i++
+	}
+	require.Nil(t, err)
+
+	iter, err = sf.Seek([]byte("xx"))
+	require.Nil(t, err)
+	assert.True(t, iter.Valid())
+	assert.Equal(t, []byte("y"), iter.Key())
 }
